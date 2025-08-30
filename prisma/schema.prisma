@@ -1,0 +1,580 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum RoleType {
+  ADMIN
+  TEACHER
+  STUDENT
+  CENTER_ADMIN
+  PARENT
+}
+
+enum AcademicStage {
+  FIRST_SECONDARY
+  SECOND_SECONDARY
+  THIRD_SECONDARY
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  EXPIRED
+  REFUNDED
+  PENDING
+}
+
+enum PaymentStatus {
+  INITIATED
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  FAWRY
+  WALLET
+  CASH
+}
+
+enum ContentType {
+  VIDEO
+  PDF
+  IMAGE
+  TEXT
+  QUIZ
+}
+
+enum QuestionType {
+  MCQ_TEXT
+  MCQ_IMAGE
+}
+
+// Models
+model User {
+  id              String          @id @default(cuid())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  firstName       String
+  middleName      String?
+  lastName        String
+  phone           String          @unique
+  email           String?         @unique
+  gender          Gender?
+  location        String?
+  academicStage   AcademicStage
+  passwordHash    String
+  
+  telegramId      String?         @unique
+  telegramUsername String?
+  telegramAuthDate DateTime?
+  
+  isActive        Boolean         @default(false)
+  emailVerified   Boolean         @default(false)
+  phoneVerified   Boolean         @default(false)
+  avatar          String?
+  lastLogin       DateTime?
+  themePreference String          @default("light") // light/dark
+
+  // Relations
+  userRoles       UserRole[]
+  userCenters     UserCenter[]
+  enrollments     Enrollment[]
+  loginEvents     LoginEvent[]
+  wallet          Wallet?
+  quizSubmissions QuizSubmission[]
+  homeworkSubmissions HomeworkSubmission[]
+  activityEvents  ActivityEvent[]
+  payments        Payment[]
+  forumTopics     ForumTopic[]
+  forumPosts      ForumPost[]
+  forumVotes      ForumVote[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+
+
+model Role {
+  id    String   @id @default(cuid())
+  name  RoleType
+  users UserRole[]
+
+  @@unique([name])
+  @@map("roles")
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Center {
+  id          String       @id @default(cuid())
+  name        String
+  city        String
+  address     String?
+  phone       String?
+  email       String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  codes       CenterCode[]
+  userCenters UserCenter[]
+  courses     Course[]
+
+  @@map("centers")
+}
+
+model CenterCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  active    Boolean  @default(true)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  // Reverse relation
+  enrollments Enrollment[]
+
+  @@map("center_codes")
+}
+
+model UserCenter {
+  userId    String
+  centerId  String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  center    Center  @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@id([userId, centerId])
+  @@map("user_centers")
+}
+
+model Course {
+  id           String       @id @default(cuid())
+  title        String
+  academicYear AcademicStage
+  description  String?
+  thumbnail    String?
+  price        Float
+  discountPrice Float?
+  isPublished  Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  centerId     String?
+  center       Center?      @relation(fields: [centerId], references: [id])
+
+  // Relations
+  lessons      Lesson[]
+  enrollments  Enrollment[]
+  coupons      Coupon[]
+
+  @@map("courses")
+}
+
+model Lesson {
+  id          String     @id @default(cuid())
+  courseId    String
+  course      Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  order       Int
+  isPublished Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  contents    Content[]
+  quizzes     Quiz[]
+  homeworks   Homework[]
+  lessonProgress LessonProgress[]
+
+  @@map("lessons")
+}
+
+model Content {
+  id          String      @id @default(cuid())
+  lessonId    String
+  lesson      Lesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title       String
+  type        ContentType
+  contentUrl  String
+  duration    Int?        // For videos, in seconds
+  order       Int
+  isFree      Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("contents")
+}
+
+model Enrollment {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId     String
+  course       Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  status       EnrollmentStatus
+  startedAt    DateTime         @default(now())
+  expiresAt    DateTime?
+  completedAt  DateTime?
+  progress     Float            @default(0) // 0-100 percentage
+  couponId     String?
+  coupon       Coupon?          @relation(fields: [couponId], references: [id])
+  centerCodeId String?
+  centerCode   CenterCode?      @relation(fields: [centerCodeId], references: [id])
+  amountPaid   Float
+  paymentId    String?
+  payment      Payment?         @relation(fields: [paymentId], references: [id])
+  walletTransactions WalletTransaction[]
+  
+
+  // Track lesson progress within this enrollment
+  lessonProgress LessonProgress[]
+
+  @@map("enrollments")
+}
+
+model LessonProgress {
+  id           String   @id @default(cuid())
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lessonId     String
+  lesson       Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  completed    Boolean  @default(false)
+  progress     Float    @default(0) // 0-100 percentage
+  lastAccessed DateTime @default(now())
+  completedAt  DateTime?
+
+  @@unique([enrollmentId, lessonId])
+  @@map("lesson_progress")
+}
+
+model Quiz {
+  id          String     @id @default(cuid())
+  lessonId    String
+  lesson      Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  timeLimit   Int?       // In seconds
+  maxAttempts Int        @default(1)
+  isPublished Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  questions   Question[]
+  submissions QuizSubmission[]
+
+  @@map("quizzes")
+}
+
+model Question {
+  id          String      @id @default(cuid())
+  quizId      String
+  quiz        Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  type        QuestionType
+  text        String?
+  imageUrl    String?
+  explanation String?
+  order       Int
+  points      Int         @default(1)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  choices     Choice[]
+  quizAnswers QuizAnswer[]
+
+  @@map("questions")
+}
+
+model Choice {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  text       String
+  isCorrect  Boolean  @default(false)
+  order      Int
+
+  // Reverse relation
+  quizAnswers QuizAnswer[]
+
+  @@map("choices")
+}
+
+model QuizSubmission {
+  id           String   @id @default(cuid())
+  quizId       String
+  quiz         Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  timeSpent    Int?     // In seconds
+  score        Float
+  totalPoints  Float
+
+  // Relations
+  answers      QuizAnswer[]
+
+  @@map("quiz_submissions")
+}
+
+model QuizAnswer {
+  id               String         @id @default(cuid())
+  submissionId     String
+  submission       QuizSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId       String
+  question         Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedChoiceId String
+  selectedChoice   Choice         @relation(fields: [selectedChoiceId], references: [id], onDelete: Cascade)
+  isCorrect        Boolean
+
+  @@map("quiz_answers")
+}
+
+model Homework {
+  id          String       @id @default(cuid())
+  lessonId    String
+  lesson      Lesson       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  dueDate     DateTime?
+  maxPoints   Float
+  isPublished Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  submissions HomeworkSubmission[]
+
+  @@map("homeworks")
+}
+
+model HomeworkSubmission {
+  id          String     @id @default(cuid())
+  homeworkId  String
+  homework    Homework   @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submission  String     // File URL or text answer
+  submittedAt DateTime   @default(now())
+  grade       Float?
+  feedback    String?
+  gradedAt    DateTime?
+
+  @@map("homework_submissions")
+}
+
+model Payment {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount       Float
+  currency     String          @default("EGP")
+  provider     PaymentProvider
+  providerRef  String?         // Fawry reference or other provider reference
+  status       PaymentStatus
+  description  String?
+  metadata     Json?           // Additional payment data
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  // Relations
+  enrollments  Enrollment[]
+  walletTxns   WalletTransaction[]
+  paymentLogs  PaymentLog[]
+
+  @@map("payments")
+}
+
+model PaymentLog {
+  id        String   @id @default(cuid())
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  event     String
+  payload   Json
+  signature String?
+  createdAt DateTime @default(now())
+
+  @@map("payment_logs")
+}
+
+model LoginEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip        String
+  userAgent String
+  os        String?
+  device    String?
+  city      String?
+  country   String?
+  success   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("login_events")
+}
+
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance   Float    @default(0)
+  currency  String   @default("EGP")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id           String   @id @default(cuid())
+  walletId     String
+  wallet       Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount       Float
+  type         String   // topup, purchase, refund, adjustment
+  description  String?
+  paymentId    String?
+  payment      Payment? @relation(fields: [paymentId], references: [id])
+  enrollmentId String?
+  enrollment   Enrollment? @relation(fields: [enrollmentId], references: [id])
+
+  createdAt    DateTime @default(now())
+
+  @@map("wallet_transactions")
+}
+
+model Coupon {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  discountType String   // percentage or fixed
+  discountValue Float
+  maxUses      Int?
+  usedCount    Int      @default(0)
+  minPurchase  Float?   // Minimum purchase amount to use coupon
+  startDate    DateTime?
+  endDate      DateTime?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  courseId     String?
+  course       Course?  @relation(fields: [courseId], references: [id])
+  enrollments  Enrollment[]
+
+  @@map("coupons")
+}
+
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String   // video_watch, quiz_complete, etc.
+  contentId   String?
+  contentUrl  String?
+  duration    Int?     // For videos, in seconds
+  progress    Float?   // 0-100 percentage
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@map("activity_events")
+}
+
+// For future forum implementation
+model ForumCategory {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  order       Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  topics      ForumTopic[]
+
+  @@map("forum_categories")
+}
+
+model ForumTopic {
+  id           String       @id @default(cuid())
+  categoryId   String
+  category     ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  content      String
+  isPinned     Boolean      @default(false)
+  isLocked     Boolean      @default(false)
+  viewCount    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Relations
+  posts        ForumPost[]
+
+  @@map("forum_topics")
+}
+
+model ForumPost {
+  id        String     @id @default(cuid())
+  topicId   String
+  topic     ForumTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  isEdited  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  votes      ForumVote[]
+
+  @@map("forum_posts")
+}
+
+model ForumVote {
+  id     String   @id @default(cuid())
+  postId String
+  post   ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value  Int      // 1 for upvote, -1 for downvote
+
+  @@unique([postId, userId])
+  @@map("forum_votes")
+}
