@@ -61,6 +61,27 @@ enum QuestionType {
   MCQ_IMAGE
 }
 
+  // Add this new enum
+enum VerificationType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+// Add this new model
+model VerificationToken {
+  id        String           @id @default(cuid())
+  tokenHash String
+  userId    String
+  type      VerificationType
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@map("verification_tokens")
+}
+
 // Models
 model User {
   id              String          @id @default(cuid())
@@ -77,7 +98,7 @@ model User {
   academicStage   AcademicStage
   passwordHash    String
   
-  telegramId      String?         @unique
+  telegramId      String?       
   telegramUsername String?
   telegramAuthDate DateTime?
   
@@ -101,6 +122,7 @@ model User {
   forumTopics     ForumTopic[]
   forumPosts      ForumPost[]
   forumVotes      ForumVote[]
+  verificationTokens VerificationToken[] // New relation
 
   @@map("users")
 }
