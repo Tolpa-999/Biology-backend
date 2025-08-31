@@ -70,6 +70,7 @@ model User {
   middleName      String?
   lastName        String
   phone           String          @unique
+  parentPhone     String   
   email           String?         @unique
   gender          Gender?
   location        String?
@@ -132,6 +133,24 @@ model UserRole {
   @@id([userId, roleId])
   @@map("user_roles")
 }
+
+
+model LoginEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip        String
+  userAgent String
+  os        String?
+  device    String?
+  city      String?
+  country   String?
+  success   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("login_events")
+}
+
 
 model Center {
   id          String       @id @default(cuid())
@@ -427,22 +446,6 @@ model PaymentLog {
   createdAt DateTime @default(now())
 
   @@map("payment_logs")
-}
-
-model LoginEvent {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ip        String
-  userAgent String
-  os        String?
-  device    String?
-  city      String?
-  country   String?
-  success   Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  @@map("login_events")
 }
 
 model Wallet {

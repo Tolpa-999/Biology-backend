@@ -22,6 +22,10 @@ export const signupSchema = Joi.object({
     .messages({
       "string.pattern.base": "Field phone must be a valid phone number",
     }),
+      parentPhone: Joi.string().pattern(/^\+?\d+$/).min(10).max(15).required()
+    .messages({
+      "string.pattern.base": "Field phone must be a valid phone number",
+    }),
   email: Joi.string().email().optional(),
   gender: Joi.string().valid("MALE", "FEMALE").required(),
   location: Joi.string().required(),

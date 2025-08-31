@@ -2,6 +2,8 @@
 export default function errorHandler(err, req, res, next) {
   let statusCode = err.statusCode || 500;
   let message = err.message || "Internal server error";
+    console.error("❌ ERROR:", err);   // <-- add this
+
 
   // Prisma validation / DB errors (optional)
   if (err.code && err.code.startsWith("P")) {
