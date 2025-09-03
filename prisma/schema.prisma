@@ -7,6 +7,41 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+/// files 
+// enums
+enum FileCategory {
+  USER
+  COURSE
+  DOCUMENT
+}
+
+enum FileType {
+  IMAGE
+  PDF
+  VIDEO
+}
+
+model File {
+  id          String       @id @default(uuid())
+  category    FileCategory
+  type        FileType
+  userId      String?      // nullable if not tied to a user
+  courseId    String?      // nullable if not tied to a course
+  originalName String
+  storedName   String?       // uuid.ext
+  path         String       // relative path, e.g. /courses/pdfs/uuid.pdf
+  mimeType     String
+  size         Int          // in bytes
+  
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course? @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  
+  createdAt    DateTime     @default(now())
+
+
+}
 // Enums
 enum RoleType {
   ADMIN
@@ -124,6 +159,10 @@ model User {
   forumVotes      ForumVote[]
   verificationTokens VerificationToken[] // New relation
 
+    files File[]
+
+
+
   @@map("users")
 }
 
@@ -238,6 +277,8 @@ model Course {
   enrollments  Enrollment[]
   coupons      Coupon[]
 
+  files File[]
+
   @@map("courses")
 }
 
@@ -267,8 +308,9 @@ model Content {
   lesson      Lesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
   title       String
   type        ContentType
-  contentUrl  String
+  contentUrl  String?
   duration    Int?        // For videos, in seconds
+  isPublished Boolean     @default(false) // <-- add this
   order       Int
   isFree      Boolean     @default(false)
   createdAt   DateTime    @default(now())

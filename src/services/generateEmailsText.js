@@ -1,35 +1,34 @@
-// 📩 Email Template: Verify Email
 export const verifyEmailBody = (verificationCode) => {
   return {
-    subject: "تأكيد البريد الإلكتروني - UR-DOC",
+    subject: "🔬 فعّل حسابك واكتشف عالم الأحياء!",
     message: `
       <div style="
         font-family: 'Segoe UI', Arial, sans-serif;
         max-width: 620px;
         margin: auto;
         padding: 0;
-        background-color: #f9f9f9;
+        background-color: #f0f8ff;
         border-radius: 12px;
-        border: 1px solid #e6e6e6;
+        border: 1px solid #cce7ff;
         overflow: hidden;
         color: #333;
         direction: rtl;
       ">
         <!-- Header -->
-        <div style="background:#2a9d8f; padding:18px; text-align:center; color:#fff; font-size:20px; font-weight:bold;">
-          منصة UR-DOC
+        <div style="background:#1abc9c; padding:18px; text-align:center; color:#fff; font-size:22px; font-weight:bold;">
+          Bioly - منصة تعلم الأحياء
         </div>
 
         <!-- Body -->
         <div style="padding: 28px; text-align:center;">
-          <h2 style="color:#2a9d8f; margin:0 0 12px;">👨‍⚕️ أهلاً بك في UR-DOC</h2>
+          <h2 style="color:#1abc9c; margin:0 0 12px;">👋 أهلاً بك يا عالم الأحياء الصغير!</h2>
           <p style="font-size:15px; color:#444; margin:0 0 18px;">
-            لتفعيل حسابك والاستفادة من كل خدماتنا الطبية، يرجى إدخال كود التحقق التالي:
+            لتبدأ رحلتك الممتعة في عالم الخلايا والجينات والكائنات الحية، فقط أدخل كود التحقق التالي:
           </p>
 
           <div style="
             display:inline-block;
-            background:#2a9d8f;
+            background:#1abc9c;
             color:#fff;
             font-size:28px;
             font-weight:bold;
@@ -46,14 +45,14 @@ export const verifyEmailBody = (verificationCode) => {
           </p>
 
           <p style="font-size:13px; color:#666; margin-top:25px;">
-            إذا لم تقم بالتسجيل في منصتنا، يمكنك تجاهل هذه الرسالة.
+            إذا لم تقم بالتسجيل، لا تقلق! يمكنك تجاهل هذه الرسالة. 🧬
           </p>
         </div>
 
         <!-- Footer -->
-        <div style="background:#f1f1f1; padding:15px; text-align:center; font-size:12px; color:#777;">
-          مع تحيات فريق UR-DOC ❤️ <br/>
-          © 2025 UR-DOC - جميع الحقوق محفوظة.
+        <div style="background:#e6f7f1; padding:15px; text-align:center; font-size:12px; color:#777;">
+          استمتع بالتعلم! 💚 فريق Bioly <br/>
+          © 2025 Bioly - جميع الحقوق محفوظة.
         </div>
       </div>
     `
@@ -64,37 +63,37 @@ export const verifyEmailBody = (verificationCode) => {
 // 📩 Email Template: Reset Password
 export const resetPasswordEmailBody = (resetCode, userEmail) => {
   return {
-    subject: "إعادة تعيين كلمة المرور - UR-DOC",
+    subject: "🔑 إعادة تعيين كلمة المرور - Bioly",
     message: `
       <div style="
         font-family: 'Segoe UI', Arial, sans-serif;
         max-width: 620px;
         margin: auto;
         padding: 0;
-        background-color: #f9f9f9;
+        background-color: #fff3e6;
         border-radius: 12px;
-        border: 1px solid #e6e6e6;
+        border: 1px solid #ffd9b3;
         overflow: hidden;
         color: #333;
         direction: rtl;
       ">
         <!-- Header -->
-        <div style="background:#e63946; padding:18px; text-align:center; color:#fff; font-size:20px; font-weight:bold;">
-          UR-DOC - استعادة الوصول
+        <div style="background:#f39c12; padding:18px; text-align:center; color:#fff; font-size:22px; font-weight:bold;">
+          Bioly - استعادة الوصول
         </div>
 
         <!-- Body -->
         <div style="padding:28px; text-align:center;">
-          <h2 style="color:#e63946; margin:0 0 12px;">🔑 إعادة تعيين كلمة المرور</h2>
+          <h2 style="color:#f39c12; margin:0 0 12px;">🧬 نسيت كلمة المرور؟ لا تقلق!</h2>
           <p style="font-size:15px; color:#444; margin:0 0 18px;">
-            تلقينا طلباً لإعادة تعيين كلمة المرور الخاصة بالبريد:<br/>
+            لقد تلقينا طلباً لإعادة تعيين كلمة المرور لحساب البريد:<br/>
             <strong>${userEmail}</strong><br/>
-            برجاء استخدام الكود التالي:
+            استخدم الكود التالي للعودة لمغامرتك العلمية:
           </p>
 
           <div style="
             display:inline-block;
-            background:#e63946;
+            background:#f39c12;
             color:#fff;
             font-size:26px;
             font-weight:bold;
@@ -111,14 +110,14 @@ export const resetPasswordEmailBody = (resetCode, userEmail) => {
           </p>
 
           <p style="font-size:13px; color:#666; margin-top:25px;">
-            إذا لم تطلب إعادة تعيين كلمة المرور، تجاهل هذه الرسالة بأمان.
+            إذا لم تطلب إعادة تعيين كلمة المرور، يمكنك تجاهل هذه الرسالة بأمان. 🧪
           </p>
         </div>
 
         <!-- Footer -->
-        <div style="background:#f1f1f1; padding:15px; text-align:center; font-size:12px; color:#777;">
-          مع خالص التحية 💙 فريق UR-DOC <br/>
-          © 2025 UR-DOC - جميع الحقوق محفوظة.
+        <div style="background:#fff0e6; padding:15px; text-align:center; font-size:12px; color:#777;">
+          استمتع بالتعلم! 💛 فريق Bioly <br/>
+          © 2025 Bioly - جميع الحقوق محفوظة.
         </div>
       </div>
     `

@@ -7,6 +7,7 @@ export default function authMiddleware(req, res, next) {
   try {
     const decoded = verifyAccessToken(token);
     req.user = decoded;
+    console.log("req.user => ", req?.user)
     next();
   } catch (err) {
     res.status(401).json({ message: 'Invalid token' });

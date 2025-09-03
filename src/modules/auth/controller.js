@@ -43,7 +43,9 @@ const clearRefreshCookie = (res) => {
 const sendVerificationEmail = async (user) => {
   const code = generateEmailVerificationCode();
   const emailBody = verifyEmailBody(code);
-  const info = await sendEmail({to: user.email,subject: emailBody.subject , html: emailBody.message});
+  const info = await sendEmail({to: user.email, subject: emailBody.subject , html: emailBody.message});
+
+  console.log("info ", info)
 
   return code; // Return code for storage
 };
@@ -77,12 +79,83 @@ const createVerificationToken = async (userId, type, code, expiryMinutes) => {
   });
 };
 
+
+export const login = catchAsync(async (req, res, next) => {
+  const { email, password } = req.body;
+
+
+
+  // Log request body for debugging
+  logger.debug(`Login request body: ${JSON.stringify(req.body)}`);
+
+  // Find user with roles
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: {
+      userRoles: {
+        include: {
+          role: true
+        }
+      }
+    }
+  });
+
+  if (!user) {
+    return next(new ErrorResponse('Invalid credentials', STATUS_CODE.UNAUTHORIZED));
+  }
+
+  if (user.email && !user.emailVerified) {
+    return next(new ErrorResponse('Email not verified', STATUS_CODE.FORBIDDEN));
+  }
+
+  if (!user.isActive) {
+    return next(new ErrorResponse('Account is inactive', STATUS_CODE.FORBIDDEN));
+  }
+
+  // Verify password
+  const isPasswordValid = await comparePassword(password, user.passwordHash);
+  if (!isPasswordValid) {
+    return next(new ErrorResponse('Invalid credentials', STATUS_CODE.UNAUTHORIZED));
+  }
+
+  // Generate tokens
+  const accessToken = generateAccessToken({ userId: user.id, role: user?.userRoles });
+  const refreshToken = generateRefreshToken({ userId: user.id });
+
+  await Promise.all([
+    setRefreshToken(user.id, refreshToken),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    })
+  ]);
+
+  setRefreshCookie(res, refreshToken);
+
+  const { passwordHash, ...userWithoutPassword } = user;
+
+  logger.info(`User logged in: ${user.phone}`);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: {
+      user: userWithoutPassword,
+      accessToken,
+      expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m'
+    },
+    message: 'Login successful',
+  });
+});
+
+
+
+
 export const signup = catchAsync(async (req, res, next) => {
   const { phone, email, password, firstName, lastName, academicStage, parentPhone, ...otherData } = req.body;
 
   // Validate parentPhone against phone
   if (phone === parentPhone) {
-    return next(new ErrorResponse('Student phone cannot be the same as parent phone', STATUS_CODE.CONFLICT));
+    return next(new ErrorResponse('مينفعش رقمك يكون نفس رقم ولي الأمر', STATUS_CODE.CONFLICT));
   }
 
   // Check if user already exists
@@ -231,23 +304,29 @@ export const verifyEmail = catchAsync(async (req, res, next) => {
 export const resendVerification = catchAsync(async (req, res, next) => {
   const { email } = req.body;
 
-  const user = await prisma.user.findUnique({
-    where: { email },
+  const existingUser = await prisma.user.findFirst({
+    where: { 
+      OR: [
+        ...(email ? [{ email }] : [])
+      ] 
+    },
   });
 
-  if (!user) {
+  console.log("email => ", existingUser)
+
+  if (!existingUser) {
     return next(new ErrorResponse('User not found', STATUS_CODE.NOT_FOUND));
   }
 
-  if (user.emailVerified) {
+  if (existingUser.emailVerified) {
     return next(new ErrorResponse('Email already verified', STATUS_CODE.BAD_REQUEST));
   }
 
   try {
-    const code = await sendVerificationEmail(user);
-    await createVerificationToken(user.id, 'EMAIL_VERIFICATION', code, VERIFICATION_CODE_EXPIRY_MINUTES);
+    const code = await sendVerificationEmail(existingUser);
+    await createVerificationToken(existingUser.id, 'EMAIL_VERIFICATION', code, VERIFICATION_CODE_EXPIRY_MINUTES);
   } catch (error) {
-    logger.error(`Failed to resend verification email for user ${user.id}: ${error.message}`);
+    logger.error(`Failed to resend verification email for existingUser ${existingUser.id}: ${error.message}`);
     return next(new ErrorResponse('Failed to send verification email', STATUS_CODE.INTERNAL_SERVER_ERROR));
   }
 
@@ -352,82 +431,6 @@ export const resetPassword = catchAsync(async (req, res, next) => {
     message: 'Password reset successfully. Please log in with your new password.',
   });
 });
-
-// ... (other functions like telegramAuth, changePassword, logout, refreshToken, getProfile remain unchanged)
-// ... (keep other functions like telegramAuth, changePassword, logout, refreshToken, getProfile as is, except for any minor adjustments if needed)
-// Verify Telegram authentication data
-
-export const login = catchAsync(async (req, res, next) => {
-  const { email, password } = req.body;
-
-
-
-  // Log request body for debugging
-  logger.debug(`Login request body: ${JSON.stringify(req.body)}`);
-
-  // Find user with roles
-  const user = await prisma.user.findUnique({
-    where: { email },
-    include: {
-      userRoles: {
-        include: {
-          role: true
-        }
-      }
-    }
-  });
-
-  if (!user) {
-    return next(new ErrorResponse('Invalid credentials', STATUS_CODE.UNAUTHORIZED));
-  }
-
-  if (user.email && !user.emailVerified) {
-    return next(new ErrorResponse('Email not verified', STATUS_CODE.FORBIDDEN));
-  }
-
-  if (!user.isActive) {
-    return next(new ErrorResponse('Account is inactive', STATUS_CODE.FORBIDDEN));
-  }
-
-  // Verify password
-  const isPasswordValid = await comparePassword(password, user.passwordHash);
-  if (!isPasswordValid) {
-    return next(new ErrorResponse('Invalid credentials', STATUS_CODE.UNAUTHORIZED));
-  }
-
-  // Generate tokens
-  const accessToken = generateAccessToken({ userId: user.id });
-  const refreshToken = generateRefreshToken({ userId: user.id });
-
-  await Promise.all([
-    setRefreshToken(user.id, refreshToken),
-    prisma.user.update({
-      where: { id: user.id },
-      data: { lastLogin: new Date() },
-    })
-  ]);
-
-  setRefreshCookie(res, refreshToken);
-
-  const { passwordHash, ...userWithoutPassword } = user;
-
-  logger.info(`User logged in: ${user.phone}`);
-
-  return res.status(STATUS_CODE.OK).json({
-    status: STATUS_MESSAGE.SUCCESS,
-    data: {
-      user: userWithoutPassword,
-      accessToken,
-      expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m'
-    },
-    message: 'Login successful',
-  });
-});
-
-
-
-
-
 
 
 const verifyTelegramData = (data, botToken) => {
@@ -676,6 +679,7 @@ export const getProfile = catchAsync(async (req, res, next) => {
       themePreference: true,
       createdAt: true,
       updatedAt: true,
+
       userRoles: {
         include: {
           role: true
