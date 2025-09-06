@@ -22,7 +22,7 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   refreshSchema 
-} from './schemas.js';
+} from './schem.js';
 import validateMiddleware from '../../middleware/validate.js';
 import rateLimitMiddleware from '../../middleware/rateLimit.js';
 import authMiddleware from '../../middleware/auth.js';

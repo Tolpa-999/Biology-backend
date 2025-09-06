@@ -20,11 +20,7 @@ const sendEmail = async ({ to, subject, html }) => {
 
   try {
     const transporter = nodemailer.createTransport({
-    host: 'localhost',
-    service: 'gmail',
-    port: 465,
-    secure: true, // Use Gmail service for automatic host/port configuration
-      
+    service: 'gmail',      
       auth: {
         user: process.env.EMAIL_USER, // Gmail address
         pass: process.env.EMAIL_PASS, // Gmail App Password
@@ -43,6 +39,7 @@ const sendEmail = async ({ to, subject, html }) => {
     return { success: true, info };
   } catch (error) {
     logger.error(`Email send error for ${to}: ${error.message}`);
+    logger.error(`user ${process.env.EMAIL_USER}: pass${process.env.EMAIL_PASS}`);
     throw new Error(`Failed to send email: ${error.message}`);
   }
 };

@@ -753,3 +753,49 @@ export const getCourseStats = catchAsync(async (req, res, next) => {
 
 
 
+export const getCourseLessons = catchAsync(async (req, res, next) => {
+  const { id } = req.params; // courseId
+
+  // Verify course exists
+  const course = await prisma.course.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+
+  if (!course) {
+    return res.status(STATUS_CODE.NOT_FOUND).json({
+      status: STATUS_MESSAGE.ERROR,
+      message: "Course not found",
+    });
+  }
+
+  // Fetch all lessons for that course
+  const lessons = await prisma.lesson.findMany({
+    where: { courseId: id },
+    orderBy: { order: "asc" },
+    include: {
+      contents: true,
+      quizzes: true,
+      homeworks: true,
+      _count: {
+        select: {
+          contents: true,
+          quizzes: true,
+          homeworks: true,
+        },
+      },
+    },
+  });
+
+  // Map into desired format
+  const data = lessons.map((lesson) => ({
+    lesson,
+  }));
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data,
+  });
+});
+
+

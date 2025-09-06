@@ -12,6 +12,15 @@ import userRoutes from './modules/users/routes.js';
 import courseRoutes from './modules/courses/routes.js';
 import lessonsRoutes from './modules/lessons/routes.js';
 
+import videoRoutes from "./modules/videos/routes.js";
+import paymentRoutes from './modules/payments/routes.js';
+
+import dashboardRoutes from './modules/dashboard/routes.js';
+
+
+
+
+
 import cookieParser from 'cookie-parser';
 
 
@@ -72,12 +81,25 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
 
 
 
+
+
 // routes
+
+//testing
+app.use("/api/videos", videoRoutes);
+
+
+
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/courses', courseRoutes);
-app.use('/api/courses', courseRoutes);
 app.use('/api/lessons', lessonsRoutes);
+app.use('/api/admin/dashboard', dashboardRoutes);
+
+// ... existing ...
+app.use('/api/payment', paymentRoutes);
+
 
 // 404 Handler
 app.all(/.*/, (req, res) => {

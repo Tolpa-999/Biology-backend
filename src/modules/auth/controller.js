@@ -302,15 +302,15 @@ export const verifyEmail = catchAsync(async (req, res, next) => {
 });
 
 export const resendVerification = catchAsync(async (req, res, next) => {
-  const { email } = req.body;
+  const { email } = req?.body;
 
-  const existingUser = await prisma.user.findFirst({
-    where: { 
-      OR: [
-        ...(email ? [{ email }] : [])
-      ] 
-    },
-  });
+  if (!email) {
+  return next(new ErrorResponse('Email is required', STATUS_CODE.BAD_REQUEST));
+}
+
+const existingUser = await prisma.user.findUnique({ where: { email } });
+
+
 
   console.log("email => ", existingUser)
 

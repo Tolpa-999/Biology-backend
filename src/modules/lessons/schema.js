@@ -31,7 +31,7 @@ export const lessonQuerySchema = Joi.object({
 export const contentSchema = Joi.object({
   title: Joi.string().min(1).max(255).optional(),
   type: Joi.string().valid("VIDEO", "PDF", "IMAGE", "TEXT", "QUIZ").optional(),
-  contentUrl: Joi.string().uri().optional(),
+  contentUrl: Joi.optional(),
   duration: Joi.number().min(0).optional(),
   order: Joi.number().integer().min(0).optional(),
   isFree: Joi.boolean().default(false),

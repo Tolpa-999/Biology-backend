@@ -15,7 +15,7 @@ export const updateCourseSchema = Joi.object({
   academicYear: Joi.string().valid("FIRST_SECONDARY", "SECOND_SECONDARY", "THIRD_SECONDARY"),
   description: Joi.string().allow(""),
   price: Joi.number().min(0),
-  discountPrice: Joi.number().min(0).optional(),
+  discountPrice: Joi.optional(),
   isPublished: Joi.boolean(),
   centerId: Joi.string().optional(),
   thumbnail: Joi.string().optional(),

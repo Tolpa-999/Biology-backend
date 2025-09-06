@@ -9,6 +9,7 @@ import {
   enrollUserInCourse,
   removeUserFromCourse,
   getCourseStats,
+  getCourseLessons
 } from './controller.js';
 import {
   createCourseSchema,
@@ -25,13 +26,13 @@ import parseJsonFields from '../../middleware/parseJsonFieldls.js';
 
 
 import { upload } from "../../utils/uploadHandler.js";  // ✅ use global handler
+import { getAllLessons } from '../lessons/controller.js';
 
 const router = Router();
 
 
 
 // All routes require authentication
-router.use(authMiddleware);
 
 
 
@@ -43,6 +44,7 @@ router.get(
   getAllCourses
 );
 
+router.use(authMiddleware);
 
 // done
 router.get(
@@ -117,6 +119,13 @@ router.delete(
 
 
 // not done
+router.get(
+  '/:id/lessons',
+  // roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+  // validateMiddleware(courseIdSchema, 'params'),
+  getCourseLessons
+);
+
 router.get(
   '/:id/stats',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),

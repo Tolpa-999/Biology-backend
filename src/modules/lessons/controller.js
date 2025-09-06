@@ -3,6 +3,7 @@ import catchAsync from '../../utils/cathAsync.js';
 import ErrorResponse from '../../utils/errorResponse.js';
 import { STATUS_CODE, STATUS_MESSAGE } from '../../utils/httpStatusCode.js';
 import logger from '../../utils/logger.js';
+import { createBunnyVideo, generateBunnySignedUrl } from '../../utils/bunny.js';
 import { unlink } from 'fs/promises';
 import path from 'path';
 
@@ -63,79 +64,7 @@ export const getAllLessons = catchAsync(async (req, res, next) => {
   });
 });
 
-export const getLessonById = catchAsync(async (req, res, next) => {
-  const { id } = req.params;
 
-  const lesson = await prisma.lesson.findUnique({
-    where: { id },
-    include: {
-      course: {
-        select: {
-          id: true,
-          title: true,
-          academicYear: true,
-          isPublished: true,
-        }
-      },
-      contents: {
-        where: { isPublished: true },
-        orderBy: { order: 'asc' },
-        select: {
-          id: true,
-          title: true,
-          type: true,
-          contentUrl: true,
-          duration: true,
-          order: true,
-          isFree: true,
-        }
-      },
-      quizzes: {
-        where: { isPublished: true },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          timeLimit: true,
-          maxAttempts: true,
-          _count: {
-            select: {
-              questions: true,
-            }
-          }
-        }
-      },
-      homeworks: {
-        where: { isPublished: true },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          dueDate: true,
-          maxPoints: true,
-        }
-      },
-      _count: {
-        select: {
-          contents: true,
-          quizzes: true,
-          homeworks: true,
-        }
-      }
-    }
-  });
-
-  if (!lesson) {
-    return next(new ErrorResponse('Lesson not found', STATUS_CODE.NOT_FOUND));
-  }
-
-  return res.status(STATUS_CODE.OK).json({
-    status: STATUS_MESSAGE.SUCCESS,
-    data: { lesson }
-  });
-});
 
 export const createLesson = catchAsync(async (req, res, next) => {
   const { courseId, ...lessonData } = req.body;
@@ -328,8 +257,178 @@ export const deleteLesson = catchAsync(async (req, res, next) => {
   });
 });
 
+
+
+
+// Helper function to check if user has access to paid content
+const hasAccessToPaidContent = async (userId, courseId, lessonId = null) => {
+  // Check if user is admin or center admin
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      userRoles: {
+        include: {
+          role: true
+        }
+      }
+    }
+  });
+
+  const isAdmin = user.userRoles.some(roleObj => 
+    roleObj.role.name === 'ADMIN' || roleObj.role.name === 'CENTER_ADMIN'
+  );
+
+  if (isAdmin) {
+    return true;
+  }
+
+  // Check course enrollment
+  if (courseId) {
+    const courseEnrollment = await prisma.enrollment.findFirst({
+      where: {
+        userId,
+        courseId,
+        status: 'ACTIVE',
+        expiresAt: {
+          gt: new Date()
+        }
+      }
+    });
+
+
+    console.log(courseEnrollment)
+
+    if (courseEnrollment) {
+      return true;
+    }
+  }
+
+  // Check lesson enrollment if specific lesson is provided
+  if (lessonId) {
+    const lessonEnrollment = await prisma.lessonEnrollment.findFirst({
+      where: {
+        userId,
+        lessonId,
+        status: 'ACTIVE',
+        expiresAt: {
+          gt: new Date()
+        }
+      }
+    });
+
+        console.log(lessonEnrollment)
+
+
+    if (lessonEnrollment) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const getLessonById = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user?.userId;
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id },
+    include: {
+      course: {
+        select: {
+          id: true,
+          title: true,
+          academicYear: true,
+          isPublished: true,
+        }
+      },
+      contents: {
+        where: { isPublished: true },
+        orderBy: { order: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          contentUrl: true,
+          duration: true,
+          order: true,
+          isFree: true,
+        }
+      },
+      quizzes: {
+        where: { isPublished: true },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          timeLimit: true,
+          maxAttempts: true,
+          _count: {
+            select: {
+              questions: true,
+            }
+          }
+        }
+      },
+      homeworks: {
+        where: { isPublished: true },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          dueDate: true,
+          maxPoints: true,
+        }
+      },
+      _count: {
+        select: {
+          contents: true,
+          quizzes: true,
+          homeworks: true,
+        }
+      }
+    }
+  });
+
+  if (!lesson) {
+    return next(new ErrorResponse('Lesson not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // Check if lesson contains paid content and user doesn't have access
+  if (userId) {
+    const hasPaidContent = lesson.contents.some(content => !content.isFree);
+    
+    if (hasPaidContent) {
+      const hasAccess = await hasAccessToPaidContent(userId, lesson.course.id, id);
+      
+      if (!hasAccess) {
+        return next(
+          new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+        );
+      }
+    }
+  } else {
+    // Anonymous user - check if lesson contains paid content
+    const hasPaidContent = lesson.contents.some(content => !content.isFree);
+    
+    if (hasPaidContent) {
+      return next(
+        new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+      );
+    }
+  }
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { lesson }
+  });
+});
+
 export const getLessonContents = catchAsync(async (req, res, next) => {
   const { id } = req.params;
+  const userId = req.user?.userId;
 
   const lesson = await prisma.lesson.findUnique({
     where: { id },
@@ -353,11 +452,38 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
     orderBy: { order: 'asc' }
   });
 
+  // Check if lesson contains paid content and user doesn't have access
+  if (userId) {
+    const hasPaidContent = contents.some(content => !content.isFree);
+    
+    if (hasPaidContent) {
+      const hasAccess = await hasAccessToPaidContent(userId, lesson.courseId, id);
+
+      console.log("hasAccess   => ", hasAccess)
+      
+      if (!hasAccess) {
+        return next(
+          new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+        );
+      }
+    }
+  } else {
+    // Anonymous user - check if lesson contains paid content
+    const hasPaidContent = contents.some(content => !content.isFree);
+    
+    if (hasPaidContent) {
+      return next(
+        new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+      );
+    }
+  }
+
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     data: { contents }
   });
 });
+
 
 export const addContentToLesson = catchAsync(async (req, res, next) => {
   const { id } = req.params;
@@ -400,7 +526,7 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
     contentUrl = `/uploads/contents/${newFilename}`;
 
     // Create File entry
-    await prisma.file.create({
+    const file = await prisma.file.create({
       data: {
         category: 'DOCUMENT',
         type: type === 'PDF' ? 'PDF' : type === 'VIDEO' ? 'VIDEO' : 'IMAGE',
@@ -408,10 +534,13 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
         storedName: newFilename,
         path: contentUrl,
         mimeType: req.file.mimetype,
-        size: req.file.size
+        size: req.file.size,
+        isFree: isFree,
       }
     });
+    console.log("file => ", file)
   }
+
 
   const content = await prisma.content.create({
     data: {
@@ -420,10 +549,12 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
       contentUrl,
       duration: duration ? parseInt(duration) : null,
       order: parseInt(order),
-      isFree: isFree === 'true',
+      isFree: isFree,
       lesson: { connect: { id } }
     }
   });
+
+  console.log("content => ", content)
 
   logger.info(`Content added to lesson ${id}: ${content.id} by user: ${req.user.userId}`);
 
@@ -433,6 +564,216 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
     message: 'Content added successfully'
   });
 });
+
+
+// Create video content and initiate Bunny upload
+export const createVideoContent = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { title, duration, order, isFree } = req.body;
+
+  // Check if lesson exists
+  const lesson = await prisma.lesson.findUnique({
+    where: { id },
+    include: {
+      course: {
+        include: {
+          center: true,
+        },
+      },
+    },
+  });
+
+  if (!lesson) {
+    return next(new ErrorResponse("الدرس غير موجود", STATUS_CODE.NOT_FOUND));
+  }
+
+  // Check permission for center admins
+  if (req.user.role === "CENTER_ADMIN" && lesson.course.centerId) {
+    const userCenter = await prisma.userCenter.findFirst({
+      where: {
+        userId: req.user.userId,
+        centerId: lesson.course.centerId,
+      },
+    });
+
+    if (!userCenter) {
+      return next(
+        new ErrorResponse(
+          "ليس لديك إذن لإضافة محتوى لهذا الدرس",
+          STATUS_CODE.FORBIDDEN
+        )
+      );
+    }
+  }
+
+  try {
+    const { guid, tusUrl, headers } = await createBunnyVideo(title);
+    return res.status(STATUS_CODE.OK).json({
+      status: STATUS_MESSAGE.SUCCESS,
+      data: { guid, tusUrl, headers },
+      message: "تم بدء الرفع إلى Bunny. استخدم TUS للرفع.",
+    });
+  } catch (err) {
+    console.error("createVideoContent error:", err.message);
+    return next(
+      new ErrorResponse(
+        `فشل إنشاء الفيديو في Bunny: ${err.message}`,
+        STATUS_CODE.INTERNAL_SERVER_ERROR
+      )
+    );
+  }
+});
+
+// Complete video upload and save to database
+export const completeVideoUpload = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { guid, title, duration, order, isFree, mimeType  } = req.body;
+
+  // Check if lesson exists
+  const lesson = await prisma.lesson.findUnique({
+    where: { id },
+    include: {
+      course: {
+        include: {
+          center: true,
+        },
+      },
+    },
+  });
+
+  if (!lesson) {
+    return next(new ErrorResponse("الدرس غير موجود", STATUS_CODE.NOT_FOUND));
+  }
+
+  // Check permission for center admins
+  if (req.user.role === "CENTER_ADMIN" && lesson.course.centerId) {
+    const userCenter = await prisma.userCenter.findFirst({
+      where: {
+        userId: req.user.userId,
+        centerId: lesson.course.centerId,
+      },
+    });
+
+    if (!userCenter) {
+      return next(
+        new ErrorResponse(
+          "ليس لديك إذن لإضافة محتوى لهذا الدرس",
+          STATUS_CODE.FORBIDDEN
+        )
+      );
+    }
+  }
+
+
+  await prisma.file.create({
+      data: {
+        category: 'DOCUMENT',
+        type: 'VIDEO',
+        originalName: title,
+        storedName: title,
+        path: 'private-video',
+        mimeType,
+        size: 0
+      }
+    });
+
+  try {
+    const content = await prisma.content.create({
+      data: {
+        title,
+        type: "VIDEO",
+        bunnyVideoGuid: guid,
+        duration: parseInt(duration),
+        order: parseInt(order),
+        isFree: isFree === "true",
+        lesson: { connect: { id } },
+        contentUrl: `${guid}`,
+      },
+    });
+
+    return res.status(STATUS_CODE.CREATED).json({
+      status: STATUS_MESSAGE.SUCCESS,
+      data: { content },
+      message: "تم إكمال رفع الفيديو وتخزينه بنجاح",
+    });
+  } catch (err) {
+    console.error("completeVideoUpload error:", err.message);
+    return next(
+      new ErrorResponse(
+        `فشل إكمال الرفع: ${err.message}`,
+        STATUS_CODE.INTERNAL_SERVER_ERROR
+      )
+    );
+  }
+});
+
+// Get signed playback URL
+export const getSignedUrl = catchAsync(async (req, res, next) => {
+  const { contentId } = req.params;
+  const userId = req.user.userId;
+
+  const content = await prisma.content.findUnique({
+    where: { id: contentId },
+    include: { lesson: { include: { course: true } } },
+  });
+
+  if (!content || content.type !== "VIDEO") {
+    return next(
+      new ErrorResponse(
+        "المحتوى غير موجود أو ليس فيديو",
+        STATUS_CODE.NOT_FOUND
+      )
+    );
+  }
+
+  const userExists = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  if (!userExists) {
+    return next(
+      new ErrorResponse("المستخدم غير موجود", STATUS_CODE.UNAUTHORIZED)
+    );
+  }
+
+  // Check if content is paid and user doesn't have access
+  if (!content.isFree) {
+    const hasAccess = await hasAccessToPaidContent(userId, content.lesson.courseId, content.lessonId);
+    
+    if (!hasAccess) {
+      return next(
+        new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+      );
+    }
+  }
+
+  try {
+    const signedUrl = generateBunnySignedUrl(content?.contentUrl);
+    return res.status(STATUS_CODE.OK).json({
+      status: STATUS_MESSAGE.SUCCESS,
+      data: { signedUrl, content },
+      message: "تم إنشاء رابط تشغيل موقّع بنجاح",
+    });
+  } catch (err) {
+    console.error("getSignedUrl error:", err.message);
+    return next(
+      new ErrorResponse(
+        `فشل إنشاء الرابط الموقّع: ${err.message}`,
+        STATUS_CODE.INTERNAL_SERVER_ERROR
+      )
+    );
+  }
+});
+
+
+
+
+
+
+
+
+
+
 
 export const updateContent = catchAsync(async (req, res, next) => {
   const { id, contentId } = req.params;

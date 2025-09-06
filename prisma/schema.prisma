@@ -7,9 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-/// files 
-// enums
+// Enums
 enum FileCategory {
   USER
   COURSE
@@ -22,27 +20,6 @@ enum FileType {
   VIDEO
 }
 
-model File {
-  id          String       @id @default(uuid())
-  category    FileCategory
-  type        FileType
-  userId      String?      // nullable if not tied to a user
-  courseId    String?      // nullable if not tied to a course
-  originalName String
-  storedName   String?       // uuid.ext
-  path         String       // relative path, e.g. /courses/pdfs/uuid.pdf
-  mimeType     String
-  size         Int          // in bytes
-  
-  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course Course? @relation(fields: [courseId], references: [id], onDelete: Cascade)
-
-  
-  createdAt    DateTime     @default(now())
-
-
-}
-// Enums
 enum RoleType {
   ADMIN
   TEACHER
@@ -81,6 +58,8 @@ enum PaymentProvider {
   FAWRY
   WALLET
   CASH
+  MANUAL // new for manuall type
+
 }
 
 enum ContentType {
@@ -96,13 +75,28 @@ enum QuestionType {
   MCQ_IMAGE
 }
 
-  // Add this new enum
 enum VerificationType {
   EMAIL_VERIFICATION
   PASSWORD_RESET
 }
 
-// Add this new model
+// Models
+model File {
+  id          String       @id @default(uuid())
+  category    FileCategory
+  type        FileType
+  userId      String?
+  courseId    String?
+  originalName String
+  storedName   String?
+  path         String
+  mimeType     String
+  size         Int
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course       Course?      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt    DateTime     @default(now())
+}
+
 model VerificationToken {
   id        String           @id @default(cuid())
   tokenHash String
@@ -110,14 +104,11 @@ model VerificationToken {
   type      VerificationType
   expiresAt DateTime
   createdAt DateTime         @default(now())
-
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([userId, type])
   @@map("verification_tokens")
 }
 
-// Models
 model User {
   id              String          @id @default(cuid())
   createdAt       DateTime        @default(now())
@@ -126,28 +117,25 @@ model User {
   middleName      String?
   lastName        String
   phone           String          @unique
-  parentPhone     String   
+  parentPhone     String
   email           String?         @unique
   gender          Gender?
   location        String?
   academicStage   AcademicStage
   passwordHash    String
-  
-  telegramId      String?       
+  telegramId      String?
   telegramUsername String?
   telegramAuthDate DateTime?
-  
   isActive        Boolean         @default(false)
   emailVerified   Boolean         @default(false)
   phoneVerified   Boolean         @default(false)
   avatar          String?
   lastLogin       DateTime?
-  themePreference String          @default("light") // light/dark
-
-  // Relations
+  themePreference String          @default("light")
   userRoles       UserRole[]
   userCenters     UserCenter[]
   enrollments     Enrollment[]
+  lessonEnrollments LessonEnrollment[] // Keep here for parallelism with enrollments
   loginEvents     LoginEvent[]
   wallet          Wallet?
   quizSubmissions QuizSubmission[]
@@ -157,12 +145,8 @@ model User {
   forumTopics     ForumTopic[]
   forumPosts      ForumPost[]
   forumVotes      ForumVote[]
-  verificationTokens VerificationToken[] // New relation
-
-    files File[]
-
-
-
+  verificationTokens VerificationToken[]
+  files           File[]
   @@map("users")
 }
 
@@ -174,13 +158,10 @@ model RefreshToken {
   expiresAt DateTime
 }
 
-
-
 model Role {
   id    String   @id @default(cuid())
   name  RoleType
   users UserRole[]
-
   @@unique([name])
   @@map("roles")
 }
@@ -190,11 +171,9 @@ model UserRole {
   roleId String
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
   role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
   @@id([userId, roleId])
   @@map("user_roles")
 }
-
 
 model LoginEvent {
   id        String   @id @default(cuid())
@@ -208,10 +187,8 @@ model LoginEvent {
   country   String?
   success   Boolean  @default(true)
   createdAt DateTime @default(now())
-
   @@map("login_events")
 }
-
 
 model Center {
   id          String       @id @default(cuid())
@@ -223,12 +200,10 @@ model Center {
   isActive    Boolean      @default(true)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
-
-  // Relations
   codes       CenterCode[]
   userCenters UserCenter[]
   courses     Course[]
-
+  lessons     Lesson[]      // Added for center-specific lessons
   @@map("centers")
 }
 
@@ -240,10 +215,7 @@ model CenterCode {
   active    Boolean  @default(true)
   expiresAt DateTime?
   createdAt DateTime @default(now())
-
-  // Reverse relation
   enrollments Enrollment[]
-
   @@map("center_codes")
 }
 
@@ -253,7 +225,6 @@ model UserCenter {
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   center    Center  @relation(fields: [centerId], references: [id], onDelete: Cascade)
   joinedAt  DateTime @default(now())
-
   @@id([userId, centerId])
   @@map("user_centers")
 }
@@ -271,14 +242,12 @@ model Course {
   updatedAt    DateTime     @updatedAt
   centerId     String?
   center       Center?      @relation(fields: [centerId], references: [id])
-
-  // Relations
   lessons      Lesson[]
   enrollments  Enrollment[]
   coupons      Coupon[]
-
-  files File[]
-
+  files        File[]
+  quizzes      Quiz[]       // Added for course-level quizzes
+  homeworks    Homework[]   // Added for course-level homeworks
   @@map("courses")
 }
 
@@ -292,13 +261,16 @@ model Lesson {
   isPublished Boolean    @default(false)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-
-  // Relations
+  centerId    String?    // Added for center-specific lessons
+  center      Center?    @relation(fields: [centerId], references: [id])
   contents    Content[]
   quizzes     Quiz[]
   homeworks   Homework[]
   lessonProgress LessonProgress[]
-
+  price       Float?     // Price for individual lesson purchase (null/0 = not purchasable alone)
+  discountPrice Float?   // Discounted price for lesson
+  lessonEnrollments LessonEnrollment[] // Added for per-lesson purchases
+  coupons     Coupon[]   // Added for lesson-specific coupons
   @@map("lessons")
 }
 
@@ -309,13 +281,13 @@ model Content {
   title       String
   type        ContentType
   contentUrl  String?
-  duration    Int?        // For videos, in seconds
-  isPublished Boolean     @default(false) // <-- add this
+  duration    Int?
+  isPublished Boolean     @default(false)
   order       Int
   isFree      Boolean     @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-
+  bunnyVideoGuid String?  // Added for Bunny.net video GUID
   @@map("contents")
 }
 
@@ -329,7 +301,7 @@ model Enrollment {
   startedAt    DateTime         @default(now())
   expiresAt    DateTime?
   completedAt  DateTime?
-  progress     Float            @default(0) // 0-100 percentage
+  progress     Float            @default(0)
   couponId     String?
   coupon       Coupon?          @relation(fields: [couponId], references: [id])
   centerCodeId String?
@@ -338,45 +310,62 @@ model Enrollment {
   paymentId    String?
   payment      Payment?         @relation(fields: [paymentId], references: [id])
   walletTransactions WalletTransaction[]
-  
-
-  // Track lesson progress within this enrollment
   lessonProgress LessonProgress[]
 
+  lessonEnrollments LessonEnrollment[]
   @@map("enrollments")
 }
 
-model LessonProgress {
-  id           String   @id @default(cuid())
-  enrollmentId String
-  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+model LessonEnrollment {
+  id           String           @id @default(cuid())
+  userId       String
   lessonId     String
-  lesson       Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  completed    Boolean  @default(false)
-  progress     Float    @default(0) // 0-100 percentage
-  lastAccessed DateTime @default(now())
-  completedAt  DateTime?
+  enrollmentId String?           // Optional link to course enrollment
+  status       EnrollmentStatus @default(PENDING)
+  startedAt    DateTime         @default(now())
+  expiresAt    DateTime?
+  amountPaid   Float            @default(0)
+  paymentId    String?
+  payment      Payment?         @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson       Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  enrollment   Enrollment?      @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  lessonProgress LessonProgress[] // Added to track progress for lesson purchases
+  @@unique([userId, lessonId])
+  @@map("lesson_enrollments")
+}
 
-  @@unique([enrollmentId, lessonId])
+model LessonProgress {
+  id              String         @id @default(cuid())
+  enrollmentId    String?
+  lessonEnrollmentId String?     // Added for per-lesson purchase progress
+  lessonId        String
+  enrollment      Enrollment?    @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lessonEnrollment LessonEnrollment? @relation(fields: [lessonEnrollmentId], references: [id], onDelete: Cascade)
+  lesson          Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  completed       Boolean        @default(false)
+  progress        Float          @default(0)
+  lastAccessed    DateTime       @default(now())
+  completedAt     DateTime?
+  @@unique([enrollmentId, lessonId, lessonEnrollmentId], name: "unique_progress")
   @@map("lesson_progress")
 }
 
 model Quiz {
   id          String     @id @default(cuid())
-  lessonId    String
-  lesson      Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  lessonId    String?
+  lesson      Lesson?    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  courseId    String?    // Added for course-level quizzes
+  course      Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   title       String
   description String?
-  timeLimit   Int?       // In seconds
+  timeLimit   Int?
   maxAttempts Int        @default(1)
   isPublished Boolean    @default(false)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-
-  // Relations
   questions   Question[]
   submissions QuizSubmission[]
-
   @@map("quizzes")
 }
 
@@ -392,11 +381,8 @@ model Question {
   points      Int         @default(1)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-
-  // Relations
   choices     Choice[]
   quizAnswers QuizAnswer[]
-
   @@map("questions")
 }
 
@@ -407,10 +393,7 @@ model Choice {
   text       String
   isCorrect  Boolean  @default(false)
   order      Int
-
-  // Reverse relation
   quizAnswers QuizAnswer[]
-
   @@map("choices")
 }
 
@@ -422,13 +405,10 @@ model QuizSubmission {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   startedAt    DateTime @default(now())
   completedAt  DateTime?
-  timeSpent    Int?     // In seconds
+  timeSpent    Int?
   score        Float
   totalPoints  Float
-
-  // Relations
   answers      QuizAnswer[]
-
   @@map("quiz_submissions")
 }
 
@@ -441,14 +421,15 @@ model QuizAnswer {
   selectedChoiceId String
   selectedChoice   Choice         @relation(fields: [selectedChoiceId], references: [id], onDelete: Cascade)
   isCorrect        Boolean
-
   @@map("quiz_answers")
 }
 
 model Homework {
   id          String       @id @default(cuid())
-  lessonId    String
-  lesson      Lesson       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  lessonId    String?
+  lesson      Lesson?      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  courseId    String?      // Added for course-level homeworks
+  course      Course?      @relation(fields: [courseId], references: [id], onDelete: Cascade)
   title       String
   description String?
   dueDate     DateTime?
@@ -456,10 +437,7 @@ model Homework {
   isPublished Boolean      @default(false)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
-
-  // Relations
   submissions HomeworkSubmission[]
-
   @@map("homeworks")
 }
 
@@ -469,12 +447,11 @@ model HomeworkSubmission {
   homework    Homework   @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
   userId      String
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  submission  String     // File URL or text answer
+  submission  String
   submittedAt DateTime   @default(now())
   grade       Float?
   feedback    String?
   gradedAt    DateTime?
-
   @@map("homework_submissions")
 }
 
@@ -485,18 +462,16 @@ model Payment {
   amount       Float
   currency     String          @default("EGP")
   provider     PaymentProvider
-  providerRef  String?         // Fawry reference or other provider reference
+  providerRef  String?
   status       PaymentStatus
   description  String?
-  metadata     Json?           // Additional payment data
+  metadata     Json?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
-
-  // Relations
   enrollments  Enrollment[]
+  lessonEnrollments LessonEnrollment[] // Added for lesson purchases
   walletTxns   WalletTransaction[]
   paymentLogs  PaymentLog[]
-
   @@map("payments")
 }
 
@@ -508,7 +483,6 @@ model PaymentLog {
   payload   Json
   signature String?
   createdAt DateTime @default(now())
-
   @@map("payment_logs")
 }
 
@@ -520,10 +494,7 @@ model Wallet {
   currency  String   @default("EGP")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  // Relations
   transactions WalletTransaction[]
-
   @@map("wallets")
 }
 
@@ -532,37 +503,34 @@ model WalletTransaction {
   walletId     String
   wallet       Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
   amount       Float
-  type         String   // topup, purchase, refund, adjustment
+  type         String
   description  String?
   paymentId    String?
   payment      Payment? @relation(fields: [paymentId], references: [id])
   enrollmentId String?
   enrollment   Enrollment? @relation(fields: [enrollmentId], references: [id])
-
   createdAt    DateTime @default(now())
-
   @@map("wallet_transactions")
 }
 
 model Coupon {
   id           String   @id @default(cuid())
   code         String   @unique
-  discountType String   // percentage or fixed
+  discountType String
   discountValue Float
   maxUses      Int?
   usedCount    Int      @default(0)
-  minPurchase  Float?   // Minimum purchase amount to use coupon
+  minPurchase  Float?
   startDate    DateTime?
   endDate      DateTime?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-
-  // Relations
   courseId     String?
   course       Course?  @relation(fields: [courseId], references: [id])
+  lessonId     String?  // Added for lesson-specific coupons
+  lesson       Lesson?  @relation(fields: [lessonId], references: [id])
   enrollments  Enrollment[]
-
   @@map("coupons")
 }
 
@@ -570,18 +538,16 @@ model ActivityEvent {
   id          String   @id @default(cuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type        String   // video_watch, quiz_complete, etc.
+  type        String
   contentId   String?
   contentUrl  String?
-  duration    Int?     // For videos, in seconds
-  progress    Float?   // 0-100 percentage
+  duration    Int?
+  progress    Float?
   metadata    Json?
   createdAt   DateTime @default(now())
-
   @@map("activity_events")
 }
 
-// For future forum implementation
 model ForumCategory {
   id          String   @id @default(cuid())
   name        String
@@ -590,10 +556,7 @@ model ForumCategory {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  // Relations
   topics      ForumTopic[]
-
   @@map("forum_categories")
 }
 
@@ -610,10 +573,7 @@ model ForumTopic {
   viewCount    Int          @default(0)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-
-  // Relations
   posts        ForumPost[]
-
   @@map("forum_topics")
 }
 
@@ -627,10 +587,7 @@ model ForumPost {
   isEdited  Boolean    @default(false)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
-
-  // Relations
   votes      ForumVote[]
-
   @@map("forum_posts")
 }
 
@@ -640,8 +597,7 @@ model ForumVote {
   post   ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
   userId String
   user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  value  Int      // 1 for upvote, -1 for downvote
-
+  value  Int
   @@unique([postId, userId])
   @@map("forum_votes")
 }

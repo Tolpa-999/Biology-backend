@@ -11,6 +11,9 @@ import {
   deleteContent,
   getLessonStats,
   reorderLessons,
+  createVideoContent,
+  completeVideoUpload,
+  getSignedUrl,
 } from './controller.js';
 import {
   createLessonSchema,
@@ -127,4 +130,33 @@ router.post(
   reorderLessons
 );
 
-export default router;
+
+
+
+
+
+// bunny routes 
+// ... existing ...
+router.post(
+  '/:id/contents/create-video',
+   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+    // validateMiddleware(/* schema */),
+     createVideoContent
+    );
+
+router.post(
+  '/:id/contents/complete-upload',
+   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+    // validateMiddleware(/* schema */),
+     completeVideoUpload
+    );
+    
+router.get(
+  '/contents/:contentId/signed-url', 
+  authMiddleware, 
+  getSignedUrl
+);
+
+
+export default router
+;
