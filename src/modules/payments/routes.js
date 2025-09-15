@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { createManualPayment, getManualPayments, initiatePayment, paymobWebhook } from './controller.js';
+import { createManualPayment, getManualPayments, initiatePayment, paymobWebhook, removeEnrollment, mobileWallet } from './controller.js';
 import authMiddleware from '../../middleware/auth.js';
-import { manualPaymentQuerySchema, manualPaymentSchema } from './schema.js';
+import { manualPaymentQuerySchema, manualPaymentSchema, removeEnrollmentSchema } from './schema.js';
 import roleMiddleware from '../../middleware/roles.js';
 import validateMiddleware from '../../middleware/validate.js';
 // ... validate, auth ...
@@ -27,6 +27,19 @@ router.get(
 //   validateMiddleware(manualPaymentQuerySchema, 'query'),
   getManualPayments
 );
+
+router.post(
+  '/remove',
+  roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+  validateMiddleware(removeEnrollmentSchema),
+  removeEnrollment
+);
+
+router.post(
+  '/full-wallet',
+  mobileWallet
+
+)
 
 
 export default router;

@@ -1,112 +1,401 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import morgan from 'morgan';
-import compression from 'compression';
-import errorMiddleware from './middleware/errors.js';
-import securityMiddleware from './middleware/security.js';
+// import express from "express";
+// import cors from "cors";
+// import helmet from "helmet";
+// import morgan from "morgan";
+// import compression from "compression";
+// import errorMiddleware from "./middleware/errors.js";
+// import securityMiddleware from "./middleware/security.js";
+// import authRoutes from "./modules/auth/routes.js";
+// import userRoutes from "./modules/users/routes.js";
+// import courseRoutes from "./modules/courses/routes.js";
+// import lessonsRoutes from "./modules/lessons/routes.js";
+// import videoRoutes from "./modules/videos/routes.js";
+// import paymentRoutes from "./modules/payments/routes.js";
+// import dashboardRoutes from "./modules/dashboard/routes.js";
+// import cookieParser from "cookie-parser";
+// import path from "path";
+// import { fileURLToPath } from "url";
+// import { createAdapter } from "@socket.io/redis-adapter";
+// import { Server as SocketServer } from "socket.io";
+// import { getRedisClient } from "./loaders/redis.js";
+// import { verifyAccessToken } from "./utils/jwt.js";
+// import logger from "./utils/logger.js";
+// import http from "http";
+// import prisma from "./loaders/prisma.js";
 
-// routes
-import authRoutes from './modules/auth/routes.js';
-import userRoutes from './modules/users/routes.js';
-import courseRoutes from './modules/courses/routes.js';
-import lessonsRoutes from './modules/lessons/routes.js';
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
 
+// const app = express();
+// const server = http.createServer(app);
+
+// if (process.env.NODE_ENV === "production") {
+//   app.set("trust proxy", 1);
+// }
+
+// app.use(express.json({ limit: "10mb" }));
+// app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// app.use(morgan("dev"));
+// app.use(cookieParser());
+
+// const allowedOrigins = ["http://localhost:3000", "https://hazem-hamdy.com"];
+
+// app.use(
+//   cors({
+//     origin: function (origin, callback) {
+//       if (!origin) return callback(null, true);
+//       if (allowedOrigins.indexOf(origin) === -1) {
+//         const msg = `The CORS policy for this site does not allow access from the specified Origin: ${origin}`;
+//         return callback(new Error(msg), false);
+//       }
+//       return callback(null, true);
+//     },
+//     credentials: true,
+//   })
+// );
+
+// app.use(compression());
+// app.use(helmet());
+// app.use(securityMiddleware);
+
+// app.use(
+//   "/uploads",
+//   express.static(path.join(process.cwd(), "Uploads"), {
+//     setHeaders: (res) => {
+//       res.set("Cross-Origin-Resource-Policy", "cross-origin");
+//     },
+//   })
+// );
+
+// (async () => {
+//   const redis = await getRedisClient();
+//   const pubClient = redis.duplicate();
+//   const subClient = redis.duplicate();
+
+//   const io = new SocketServer(server, {
+//     cors: { origin: allowedOrigins, credentials: true },
+//     adapter: createAdapter(pubClient, subClient),
+//   });
+
+//   io.use(async (socket, next) => {
+//     const token = socket.handshake.auth.token;
+//     console.log('WebSocket auth attempt:', {
+//       token: token ? token.substring(0, 10) + '...' : 'missing',
+//       timestamp: new Date().toISOString(),
+//     });
+//     if (!token) return next(new Error("Authentication error"));
+//     try {
+//       const decoded = verifyAccessToken(token);
+//       console.log('Token decoded:', {
+//         userId: decoded.userId,
+//         sessionVersion: decoded.sessionVersion,
+//       });
+//       const user = await prisma.user.findUnique({
+//         where: { id: decoded.userId },
+//         select: { sessionVersion: true, isActive: true },
+//       });
+//       console.log('User lookup:', {
+//         userId: decoded.userId,
+//         found: !!user,
+//         isActive: user?.isActive,
+//         sessionVersion: user?.sessionVersion,
+//       });
+//       if (
+//         !user ||
+//         !user.isActive ||
+//         user.sessionVersion !== decoded.sessionVersion
+//       ) {
+//         return next(new Error("Invalid or expired session"));
+//       }
+//       socket.user = decoded;
+//       next();
+//     } catch (err) {
+//       console.error('WebSocket auth error:', {
+//         message: err.message,
+//         token: token ? token.substring(0, 10) + '...' : 'missing',
+//         timestamp: new Date().toISOString(),
+//       });
+//       next(new Error("Invalid token"));
+//     }
+//   });
+
+//   io.on("connection", (socket) => {
+//     logger.info(`WS connected: ${socket.id}`, {
+//       userId: socket.user.userId,
+//     });
+//     const userId = socket.user.userId;
+
+//     socket.on("subscribe", () => {
+//       socket.join(`user:${userId}`);
+//       logger.info(`User subscribed to room: user:${userId}`);
+//     });
+
+//     socket.on("disconnect", () => {
+//       logger.info(`WS disconnected: ${socket.id}`);
+//     });
+//   });
+// })();
+
+// app.use("/api/videos", videoRoutes);
+// app.use("/api/auth", authRoutes);
+// app.use("/api/users", userRoutes);
+// app.use("/api/courses", courseRoutes);
+// app.use("/api/lessons", lessonsRoutes);
+// app.use("/api/admin/dashboard", dashboardRoutes);
+// app.use("/api/payment", paymentRoutes);
+
+// app.all(/.*/, (req, res) => {
+//   res.status(404).json({ status: "error", message: "resource not available" });
+// });
+
+// app.use(errorMiddleware);
+
+// export default server;
+
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import compression from "compression";
+import errorMiddleware from "./middleware/errors.js";
+import securityMiddleware from "./middleware/security.js";
+import authRoutes from "./modules/auth/routes.js";
+import userRoutes from "./modules/users/routes.js";
+import courseRoutes from "./modules/courses/routes.js";
+import lessonsRoutes from "./modules/lessons/routes.js";
 import videoRoutes from "./modules/videos/routes.js";
-import paymentRoutes from './modules/payments/routes.js';
-
-import dashboardRoutes from './modules/dashboard/routes.js';
-
-
-
-
-
-import cookieParser from 'cookie-parser';
-
-
+import paymentRoutes from "./modules/payments/routes.js";
+import dashboardRoutes from "./modules/dashboard/routes.js";
+import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
-
+import { createAdapter } from "@socket.io/redis-adapter";
+import { Server as SocketServer } from "socket.io";
+import { getRedisClient } from "./loaders/redis.js";
+import { verifyAccessToken } from "./utils/jwt.js";
+import logger from "./utils/logger.js";
+import http from "http";
+import prisma from "./loaders/prisma.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const server = http.createServer(app);
 
-
-// Configure trust proxy for production (adjust based on your reverse proxy setup)
-if (process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1); // Trust the first proxy (e.g., Nginx, Cloudflare)
-} else {
-//   app.set('trust proxy', false); // Disable in development to avoid rate limit bypass
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
 }
 
-// Middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(morgan('dev'));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(morgan("dev"));
 app.use(cookieParser());
 
-// CORS configuration
-// app.use(cors({ origin: 'https://hazem-hamdy.com', credentials: true,}));
+const allowedOrigins = ["http://localhost:3000", "https://hazem-hamdy.com"];
 
-
-// Allow multiple origins
-const allowedOrigins = ['http://localhost:3000', 'https://hazem-hamdy.com'];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = `The CORS policy for this site does not allow access from the specified Origin: ${origin}`;
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg = `The CORS policy for this site does not allow access from the specified Origin: ${origin}`;
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+  })
+);
 
 app.use(compression());
 app.use(helmet());
 app.use(securityMiddleware);
 
-// Serve uploads statically with proper cross-origin header
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
-  setHeaders: (res) => {
-    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "Uploads"), {
+    setHeaders: (res) => {
+      res.set("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  })
+);
+
+(async () => {
+  const redis = await getRedisClient();
+  const pubClient = redis.duplicate();
+  const subClient = redis.duplicate();
+
+  const io = new SocketServer(server, {
+    cors: { origin: allowedOrigins, credentials: true },
+    adapter: createAdapter(pubClient, subClient),
+  });
+
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth.token;
+    console.log('WebSocket auth attempt:', {
+      token: token ? token.substring(0, 10) + '...' : 'missing',
+      timestamp: new Date().toISOString(),
+    });
+    if (!token) {
+      console.log('WebSocket auth error: No token provided');
+      return next(new Error("Authentication error"));
+    }
+    try {
+      const decoded = verifyAccessToken(token);
+      console.log('Token decoded:', {
+        userId: decoded.userId,
+        sessionVersion: decoded.sessionVersion,
+        timestamp: new Date().toISOString(),
+      });
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+        select: { sessionVersion: true, isActive: true },
+      });
+      console.log('User lookup:', {
+        userId: decoded.userId,
+        found: !!user,
+        isActive: user?.isActive,
+        sessionVersion: user?.sessionVersion,
+        timestamp: new Date().toISOString(),
+      });
+      if (
+        !user ||
+        !user.isActive ||
+        user.sessionVersion !== decoded.sessionVersion
+      ) {
+        console.log('WebSocket auth error:', {
+          userFound: !!user,
+          isActive: user?.isActive,
+          sessionVersionMatch: user?.sessionVersion === decoded.sessionVersion,
+          timestamp: new Date().toISOString(),
+        });
+        return next(new Error("Invalid or expired session"));
+      }
+      socket.user = decoded;
+      next();
+    } catch (err) {
+      console.error('WebSocket auth error:', {
+        message: err.message,
+        token: token ? token.substring(0, 10) + '...' : 'missing',
+        timestamp: new Date().toISOString(),
+      });
+      next(new Error("Invalid token"));
+    }
+  });
+
+  io.on("connection", (socket) => {
+    logger.info(`WS connected: ${socket.id}`, {
+      userId: socket.user.userId,
+      timestamp: new Date().toISOString(),
+    });
+    const userId = socket.user.userId;
+
+    socket.on("subscribe", () => {
+      socket.join(`user:${userId}`);
+      logger.info(`User subscribed to room: user:${userId}`, {
+        timestamp: new Date().toISOString(),
+      });
+      // NEW: Log clients in room
+      io.in(`user:${userId}`).allSockets().then((clients) => {
+        logger.info(`Clients in room user:${userId}`, {
+          clientCount: clients.size,
+          clientIds: Array.from(clients),
+          timestamp: new Date().toISOString(),
+        });
+      });
+    });
+
+    socket.on("disconnect", () => {
+      logger.info(`WS disconnected: ${socket.id}`, {
+        userId,
+        timestamp: new Date().toISOString(),
+      });
+    });
+  });
+
+  // subClient.subscribe('user:*', async (message, channel) => {
+  //   try {
+  //     logger.info(`Received Redis message on channel: ${channel}`, {
+  //       message,
+  //       timestamp: new Date().toISOString(),
+  //     });
+  //     const parsed = JSON.parse(message);
+  //     if (parsed.event === 'force_logout') {
+  //       const userId = channel.split(':')[1];
+
+  //       const clients = await io.in(`user:${userId}`).allSockets();
+
+  //       // io.in(`user:${userId}`).allSockets().then((clients) => {
+  //         logger.info(`Emittingggg force_logout ----------- to room: user:${userId}`, {
+  //           clientCount: clients.size,
+  //           clientIds: Array.from(clients),
+  //           timestamp: new Date().toISOString(),
+  //         });
+  //         io.to(`user:${userId}`).emit('force_logout');
+  //       // });
+  //     }
+  //   } catch (err) {
+  //     logger.error('Error handling Redis message:', {
+  //       error: err.message,
+  //       channel,
+  //       message,
+  //       timestamp: new Date().toISOString(),
+  //     });
+  //   }
+  // });
+
+  await subClient.pSubscribe('user:*', async (message, channel) => {
+  try {
+    logger.info(`Received Redis message on channel: ${channel}`, {
+      message,
+      timestamp: new Date().toISOString(),
+    });
+
+    const parsed = JSON.parse(message);
+
+    if (parsed.event === 'force_logout') {
+      const userId = channel.split(':')[1];
+      const room = `user:${userId}`;
+
+      const clients = await io.in(room).allSockets();
+
+      logger.info(`Emittingggg force_logout ----------- to room: ${room}`, {
+        clientCount: clients.size,
+        clientIds: Array.from(clients),
+        timestamp: new Date().toISOString(),
+      });
+
+      io.to(room).emit('force_logout');
+    }
+  } catch (err) {
+    logger.error('Error handling Redis message:', {
+      error: err.message,
+      channel,
+      message,
+      timestamp: new Date().toISOString(),
+    });
   }
-}));
-
-
-
-
-
-
-// routes
-
-//testing
-app.use("/api/videos", videoRoutes);
-
-
-
-
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/courses', courseRoutes);
-app.use('/api/lessons', lessonsRoutes);
-app.use('/api/admin/dashboard', dashboardRoutes);
-
-// ... existing ...
-app.use('/api/payment', paymentRoutes);
-
-
-// 404 Handler
-app.all(/.*/, (req, res) => {
-  res.status(404).json({ status: 'error', message: 'resource not available' });
 });
 
-// Error Handler
+
+
+
+  
+})();
+
+app.use("/api/videos", videoRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/courses", courseRoutes);
+app.use("/api/lessons", lessonsRoutes);
+app.use("/api/admin/dashboard", dashboardRoutes);
+app.use("/api/payment", paymentRoutes);
+
+app.all(/.*/, (req, res) => {
+  res.status(404).json({ status: "error", message: "resource not available" });
+});
+
 app.use(errorMiddleware);
 
-export default app;
+export default server;

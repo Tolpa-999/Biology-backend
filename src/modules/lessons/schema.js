@@ -12,6 +12,8 @@ export const updateLessonSchema = Joi.object({
   title: Joi.string().min(1).max(255),
   description: Joi.string().allow(""),
   order: Joi.number().integer().min(0),
+  price: Joi.number(),
+  discountPrice: Joi.number(),
   isPublished: Joi.boolean(),
 }).unknown(false);
 
@@ -35,6 +37,7 @@ export const contentSchema = Joi.object({
   duration: Joi.number().min(0).optional(),
   order: Joi.number().integer().min(0).optional(),
   isFree: Joi.boolean().default(false),
+  isPublished: Joi.boolean().default(true),
 }).unknown(false);
 
 export const contentIdSchema = Joi.object({

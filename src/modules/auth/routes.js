@@ -26,6 +26,7 @@ import {
 import validateMiddleware from '../../middleware/validate.js';
 import rateLimitMiddleware from '../../middleware/rateLimit.js';
 import authMiddleware from '../../middleware/auth.js';
+import sessionValidator from '../../middleware/sessionValidator.js';
 
 const router = Router();
 
@@ -85,23 +86,8 @@ router.post(
 );
 
 // Protected routes (require authentication)
-router.post(
-  '/logout',
-  authMiddleware,
-  logout
-);
-
-router.post(
-  '/change-password',
-  authMiddleware,
-  validateMiddleware(changePasswordSchema),
-  changePassword
-);
-
-router.get(
-  '/profile',
-  authMiddleware,
-  getProfile
-);
+router.post('/logout', authMiddleware, logout);  // NEW: Add validator
+router.post('/change-password', authMiddleware, validateMiddleware(changePasswordSchema), changePassword);
+router.get('/profile', authMiddleware, getProfile);
 
 export default router;

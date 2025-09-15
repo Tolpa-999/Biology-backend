@@ -240,7 +240,7 @@ let course = await prisma.course.create({
 export const updateCourse = catchAsync(async (req, res, next) => {
   console.log("update course hitted")
   const { id } = req.params;
-  const { centerId, ...updateData } = req.body || {};
+  const {isPublished, price, centerId, ...updateData } = req.body || {};
   let thumbnailUrl = null;
 
   console.log("update course hitted")
@@ -299,6 +299,8 @@ export const updateCourse = catchAsync(async (req, res, next) => {
     where: { id },
     data: {
       ...updateData,
+      price: parseFloat(price),
+      isPublished: isPublished == true,
       ...(centerId && { center: { connect: { id: centerId } } }),
     },
     include: {

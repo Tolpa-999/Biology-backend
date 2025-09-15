@@ -226,6 +226,63 @@ export const getUserDetails = catchAsync(async (req, res, next) => {
   });
 });
 
+
+// src/modules/dashboard/controller.js
+
+export const toggleUserRole = catchAsync(async (req, res, next) => {
+  const { id } = req.params; // user ID
+  const targetRole = req.body?.targetRole; // optional (force specific role)
+
+  const user = await prisma.user.findUnique({
+    where: { id },
+    include: { userRoles: { include: { role: true } } },
+  });
+
+  if (!user) {
+    return next(new ErrorResponse('User not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // current role(s)
+  const currentRole = user.userRoles[0]?.role.name; // assuming 1 main role
+
+  // toggle or force role
+  let newRoleName = targetRole 
+    ? targetRole 
+    : currentRole?.toUpperCase() === 'ADMIN' 
+      ? 'STUDENT' 
+      : 'ADMIN';
+
+  // find role ID
+  const role = await prisma.role.findUnique({
+    where: { name: newRoleName },
+  });
+
+  if (!role) {
+    return next(new ErrorResponse('Target role not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // remove old roles & assign new one
+  await prisma.userRole.deleteMany({
+    where: { userId: id },
+  });
+
+  await prisma.userRole.create({
+    data: {
+      userId: id,
+      roleId: role.id,
+    },
+  });
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    message: `Role updated successfully to ${newRoleName}`,
+    data: { userId: id, newRole: newRoleName },
+  });
+});
+
+
+
+
 export const getCourseStats = catchAsync(async (req, res, next) => {
   const { fromDate, toDate, academicYear, centerId } = req.query;
 

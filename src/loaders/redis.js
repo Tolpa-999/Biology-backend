@@ -59,3 +59,64 @@
 // });
 
 // export default getRedisClient;
+
+
+// src/loaders/redis.js (uncomment and keep as-is, but add export for pubsub)
+import IORedis from 'ioredis';
+import env from '../config/index.js';
+import logger from '../utils/logger.js';
+
+let redisClient = null;
+let isConnecting = false;
+
+const retryStrategy = (times) => {
+  if (times > env.REDIS_RETRY_MAX || 5) {
+    logger.error(`Redis connection failed after ${times} attempts`);
+    return null;
+  }
+  const delay = Math.min(Math.pow(2, times) * (env.REDIS_RETRY_BACKOFF_MS || 1000), 60000);
+  logger.warn(`Redis retry attempt ${times}, waiting ${delay}ms`);
+  return delay;
+};
+
+const createRedisClient = () => {
+  if (redisClient) return redisClient;
+
+  redisClient = new IORedis(env.REDIS_URL, {
+    retryStrategy,
+    maxRetriesPerRequest: null,
+    enableAutoPipelining: true,
+  });
+
+  redisClient.on('ready', () => logger.info('Redis connected successfully'));
+  redisClient.on('error', (err) => logger.error(`Redis error: ${err.message}`));
+  redisClient.on('reconnecting', () => logger.info('Redis reconnecting...'));
+  redisClient.on('end', () => logger.warn('Redis connection closed'));
+
+  return redisClient;
+};
+
+export const getRedisClient = async () => {
+  if (!redisClient && !isConnecting) {
+    isConnecting = true;
+    createRedisClient();
+    try {
+      await redisClient.ping();
+      logger.info('Redis ping successful');
+    } catch (err) {
+      logger.error(`Redis initial connection failed: ${err.message}`);
+      throw err;
+    } finally {
+      isConnecting = false;
+    }
+  }
+  return redisClient;
+};
+
+process.on('SIGTERM', async () => {
+  if (redisClient) {
+    await redisClient.quit();
+    logger.info('Redis disconnected on shutdown');
+  }
+  process.exit(0);
+});

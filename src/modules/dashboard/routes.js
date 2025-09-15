@@ -5,6 +5,7 @@ import {
   getUserStats,
   getAllUsers,
   getUserDetails,
+  toggleUserRole,
   getCourseStats,
   getAllCourses,
   getCourseDetails,
@@ -52,6 +53,12 @@ router.get(
   '/users/:id',
   validateMiddleware(userIdSchema, 'params'),
   getUserDetails
+);
+
+router.patch(
+  '/users/:id',
+  // validateMiddleware(userIdSchema, 'params'),
+  toggleUserRole
 );
 
 // Courses management

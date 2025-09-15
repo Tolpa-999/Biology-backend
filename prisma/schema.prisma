@@ -7,6 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+
+
 // Enums
 enum FileCategory {
   USER
@@ -59,7 +62,7 @@ enum PaymentProvider {
   WALLET
   CASH
   MANUAL // new for manuall type
-
+  CARD
 }
 
 enum ContentType {
@@ -147,6 +150,10 @@ model User {
   forumVotes      ForumVote[]
   verificationTokens VerificationToken[]
   files           File[]
+
+  sessionVersion   Int             @default(0)
+
+
   @@map("users")
 }
 
@@ -311,6 +318,7 @@ model Enrollment {
   payment      Payment?         @relation(fields: [paymentId], references: [id])
   walletTransactions WalletTransaction[]
   lessonProgress LessonProgress[]
+  updatedAt    DateTime?         @updatedAt
 
   lessonEnrollments LessonEnrollment[]
   @@map("enrollments")
@@ -601,3 +609,16 @@ model ForumVote {
   @@unique([postId, userId])
   @@map("forum_votes")
 }
+
+model Upload {
+  id        Int      @id @default(autoincrement())
+  guid      String   @unique
+  uploadUrl String
+  lessonId  String?
+  userId    Int?
+  fileName  String?
+  fileSize  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+

@@ -14,6 +14,9 @@ import {
   createVideoContent,
   completeVideoUpload,
   getSignedUrl,
+  getUploadByGuid,
+  refreshUploadHeaders,
+  saveUploadUrl,
 } from './controller.js';
 import {
   createLessonSchema,
@@ -150,7 +153,26 @@ router.post(
     // validateMiddleware(/* schema */),
      completeVideoUpload
     );
+
+
+router.post(
+  '/uploads/refresh',
+   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+    refreshUploadHeaders
+  );
+router.post(
+  '/uploads/save',
+   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+    saveUploadUrl
+  );
+router.get(
+  '/uploads/:guid', 
+  roleMiddleware(['ADMIN', 'CENTER_ADMIN']), 
+  getUploadByGuid);
     
+
+
+
 router.get(
   '/contents/:contentId/signed-url', 
   authMiddleware, 

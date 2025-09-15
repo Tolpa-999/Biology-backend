@@ -3,7 +3,7 @@ import catchAsync from '../../utils/cathAsync.js';
 import ErrorResponse from '../../utils/errorResponse.js';
 import { STATUS_CODE, STATUS_MESSAGE } from '../../utils/httpStatusCode.js';
 import logger from '../../utils/logger.js';
-import { createBunnyVideo, generateBunnySignedUrl } from '../../utils/bunny.js';
+import { createBunnyVideo, generateBunnySignedUrl, generateBunnyAuthHeadersForGuid } from '../../utils/bunny.js';
 import { unlink } from 'fs/promises';
 import path from 'path';
 
@@ -405,7 +405,7 @@ export const getLessonById = catchAsync(async (req, res, next) => {
       
       if (!hasAccess) {
         return next(
-          new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+          new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
         );
       }
     }
@@ -415,7 +415,7 @@ export const getLessonById = catchAsync(async (req, res, next) => {
     
     if (hasPaidContent) {
       return next(
-        new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+        new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
       );
     }
   }
@@ -463,7 +463,7 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
       
       if (!hasAccess) {
         return next(
-          new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+          new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
         );
       }
     }
@@ -473,7 +473,7 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
     
     if (hasPaidContent) {
       return next(
-        new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+        new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
       );
     }
   }
@@ -566,6 +566,9 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
 });
 
 
+
+
+
 // Create video content and initiate Bunny upload
 export const createVideoContent = catchAsync(async (req, res, next) => {
   const { id } = req.params;
@@ -605,7 +608,6 @@ export const createVideoContent = catchAsync(async (req, res, next) => {
       );
     }
   }
-
   try {
     const { guid, tusUrl, headers } = await createBunnyVideo(title);
     return res.status(STATUS_CODE.OK).json({
@@ -685,9 +687,9 @@ export const completeVideoUpload = catchAsync(async (req, res, next) => {
         bunnyVideoGuid: guid,
         duration: parseInt(duration),
         order: parseInt(order),
-        isFree: isFree === "true",
+        isFree: isFree == "true",
         lesson: { connect: { id } },
-        contentUrl: `${guid}`,
+                contentUrl: `${guid}`,
       },
     });
 
@@ -706,6 +708,66 @@ export const completeVideoUpload = catchAsync(async (req, res, next) => {
     );
   }
 });
+
+
+
+
+// POST /uploads/refresh  (body: { guid })
+export const refreshUploadHeaders = catchAsync(async (req, res, next) => {
+  const { guid } = req.body || req.params;
+  if (!guid) return res.status(400).json({ error: "guid required" });
+
+  // Generate headers with maximum expiry (7 days) or customize based on request
+  const { LibraryId, AuthorizationSignature, AuthorizationExpire, VideoId, tusUrl } =
+    generateBunnyAuthHeadersForGuid(guid);
+
+  return res.json({
+    status: "success",
+    data: {
+      guid: VideoId,
+      tusUrl,
+      headers: { LibraryId, AuthorizationSignature, AuthorizationExpire, VideoId },
+    },
+  });
+});
+
+// POST /uploads/save  (body: { guid, uploadUrl, lessonId })
+export const saveUploadUrl = catchAsync(async (req, res, next) => {
+  const { guid, uploadUrl, lessonId, fileName, fileSize } = req.body;
+  const userId = req.user?.userId || null;
+
+  if (!guid || !uploadUrl) return res.status(400).json({ error: "guid & uploadUrl required" });
+
+  const up = await prisma.upload.upsert({
+    where: { guid },
+    update: { uploadUrl, lessonId: lessonId || null, fileName: fileName || null, fileSize: fileSize ? Number(fileSize) : null, updatedAt: new Date() },
+    create: { guid, uploadUrl, lessonId: lessonId || null, userId, fileName: fileName || null, fileSize: fileSize ? Number(fileSize) : null },
+  });
+
+  return res.json({ status: "success", data: up });
+});
+
+// GET /uploads/:guid
+export const getUploadByGuid = catchAsync(async (req, res, next) => {
+  const { guid } = req.params;
+  const up = await prisma.upload.findUnique({ where: { guid } });
+  if (!up) return res.status(404).json({ error: "not found" });
+  res.json({ status: "success", data: up });
+});
+
+// GET /uploads/lesson/:lessonId
+export const getUploadByLesson = catchAsync(async (req, res, next) => {
+  const { lessonId } = req.params;
+  if (!lessonId) return res.status(400).json({ error: "lessonId required" });
+
+  const upload = await prisma.upload.findFirst({ where: { lessonId } });
+  if (!upload) return res.status(404).json({ status: "not_found" });
+  return res.json({ status: "success", data: upload });
+});
+
+
+
+
 
 // Get signed playback URL
 export const getSignedUrl = catchAsync(async (req, res, next) => {
@@ -742,7 +804,7 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
     
     if (!hasAccess) {
       return next(
-        new ErrorResponse("غير مسموح لك بمشاهدة المحتوى المدفوع", STATUS_CODE.FORBIDDEN)
+        new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
       );
     }
   }
@@ -858,12 +920,16 @@ export const updateContent = catchAsync(async (req, res, next) => {
     });
   }
 
+
+  console.log("is free => ", isFree)
+
+
   const updateData = {
     title,
     type,
     duration: duration ? parseInt(duration) : null,
     order: parseInt(order),
-    isFree: isFree === 'true',
+    isFree: isFree,
     ...(contentUrl && { contentUrl })
   };
 

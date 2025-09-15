@@ -18,6 +18,7 @@ import logger from '../../utils/logger.js';
 import sendEmail from '../../services/sendEmail.js';
 import { generateEmailVerificationCode } from '../../services/GenerateEmailVerificationCode.js';
 import { resetPasswordEmailBody, verifyEmailBody } from '../../services/generateEmailsText.js';
+import { getRedisClient } from '../../loaders/redis.js';
 
 const VERIFICATION_CODE_EXPIRY_MINUTES = 15;
 const RESET_CODE_EXPIRY_MINUTES = 15;
@@ -58,32 +59,21 @@ const sendResetPasswordEmail = async (user) => {
 };
 
 const createVerificationToken = async (userId, type, code, expiryMinutes) => {
-  const tokenHash = await hashPassword(code);
-  const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+     const tokenHash = await hashPassword(code);
+     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
-  await prisma.$transaction(async (tx) => {
-    // Delete existing token for this type
-    await tx.verificationToken.deleteMany({
-      where: { userId, type },
-    });
-
-    // Create new token
-    await tx.verificationToken.create({
-      data: {
-        tokenHash,
-        userId,
-        type,
-        expiresAt,
-      },
-    });
-  });
+     await prisma.$transaction(async (tx) => {
+       await tx.verificationToken.deleteMany({ where: { userId, type } });
+       await tx.verificationToken.create({
+         data: { tokenHash, userId, type, expiresAt },
+       });
+     });
 };
+
 
 
 export const login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
-
-
 
   // Log request body for debugging
   logger.debug(`Login request body: ${JSON.stringify(req.body)}`);
@@ -118,33 +108,43 @@ export const login = catchAsync(async (req, res, next) => {
     return next(new ErrorResponse('Invalid credentials', STATUS_CODE.UNAUTHORIZED));
   }
 
+  // NEW: Increment sessionVersion and get updated user
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: { sessionVersion: { increment: 1 }, lastLogin: new Date() },
+    include: { userRoles: { include: { role: true } } }
+  });
+
   // Generate tokens
-  const accessToken = generateAccessToken({ userId: user.id, role: user?.userRoles });
-  const refreshToken = generateRefreshToken({ userId: user.id });
+  const accessToken = generateAccessToken({ 
+    userId: updatedUser.id, 
+    role: updatedUser.userRoles, 
+    sessionVersion: updatedUser.sessionVersion  // NEW: Include in JWT
+  });
+  const refreshToken = generateRefreshToken({ userId: updatedUser.id });
 
-  await Promise.all([
-    setRefreshToken(user.id, refreshToken),
-    prisma.user.update({
-      where: { id: user.id },
-      data: { lastLogin: new Date() },
-    })
-  ]);
-
+  await setRefreshToken(updatedUser.id, refreshToken);
   setRefreshCookie(res, refreshToken);
 
-  const { passwordHash, ...userWithoutPassword } = user;
+
+
+
+
+  // NEW: Publish force_logout to invalidate other sessions (real-time)
+  const redis = await getRedisClient();
+  await redis.publish(`user:${updatedUser.id}`, JSON.stringify({ event: 'force_logout' }));
+  logger.info(`Published ----------------- force_logout to user:${updatedUser.id}`);
+
+  const { passwordHash, sessionVersion, ...userWithoutSensitive } = updatedUser;
 
   logger.info(`User logged in: ${user.phone}`);
 
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
-    data: {
-      user: userWithoutPassword,
-      accessToken,
-      expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m'
-    },
+    data: { user: userWithoutSensitive, accessToken, expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m' },
     message: 'Login successful',
   });
+
 });
 
 
@@ -218,14 +218,6 @@ export const signup = catchAsync(async (req, res, next) => {
     }
   }
 
-  // Generate tokens
-  const accessToken = generateAccessToken({ userId: newUser.id });
-  const refreshToken = generateRefreshToken({ userId: newUser.id });
-
-  // Store refresh token
-  await setRefreshToken(newUser.id, refreshToken);
-  setRefreshCookie(res, refreshToken);
-
   // Remove sensitive data
   const { passwordHash: _, ...userWithoutPassword } = newUser;
 
@@ -235,7 +227,6 @@ export const signup = catchAsync(async (req, res, next) => {
     status: STATUS_MESSAGE.SUCCESS,
     data: {
       user: userWithoutPassword,
-      accessToken,
       expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m'
     },
     message: email 
@@ -339,7 +330,7 @@ const existingUser = await prisma.user.findUnique({ where: { email } });
 export const forgotPassword = catchAsync(async (req, res, next) => {
   const { email } = req.body;
 
-  const user = await prisma.user.findUnique({
+  const user = await prisma.user.ue({
     where: { email },
   });
 
@@ -373,13 +364,9 @@ export const forgotPassword = catchAsync(async (req, res, next) => {
 export const resetPassword = catchAsync(async (req, res, next) => {
   const { email, code, newPassword } = req.body;
 
-  const user = await prisma.user.findUnique({
-    where: { email },
-  });
+   const user = await prisma.user.findUnique({ where: { email } });
 
-  if (!user) {
-    return next(new ErrorResponse('User not found', STATUS_CODE.NOT_FOUND));
-  }
+     if (!user) return res.status(STATUS_CODE.OK).json({ status: STATUS_MESSAGE.SUCCESS, message: 'If the email exists, a reset code has been sent' });
 
   const verificationToken = await prisma.verificationToken.findUnique({
     where: {
@@ -406,30 +393,30 @@ export const resetPassword = catchAsync(async (req, res, next) => {
   const newHash = await hashPassword(newPassword);
 
   // Update password, delete all refresh tokens, and delete verification token
-  await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: user.id },
-      data: { passwordHash: newHash },
-    });
+       await prisma.$transaction(async (tx) => {
+       await tx.user.update({
+         where: { id: user.id },
+         data: { passwordHash: newHash, sessionVersion: { increment: 1 } },
+       });
+       await tx.refreshToken.deleteMany({ where: { userId: user.id } });
+       await tx.verificationToken.delete({ where: { id: verificationToken.id } });
+     });
 
-    await tx.refreshToken.deleteMany({ 
-      where: { userId: user.id } 
-    });
 
-    await tx.verificationToken.delete({
-      where: { id: verificationToken.id },
-    });
-  });
+  // NEW: Publish force_logout
+  try {
+       const redis = await getRedisClient();
+       await redis.publish(`force_logout:${user.id}`, 'logout');
+     } catch (err) {
+       logger.error(`Redis publish failed for user ${user.id}: ${err.message}`);
+     }
 
-  // Clear any existing refresh token cookies
-  clearRefreshCookie(res);
-
-  logger.info(`Password reset for user: ${user.id}`);
-
-  return res.status(STATUS_CODE.OK).json({
-    status: STATUS_MESSAGE.SUCCESS,
-    message: 'Password reset successfully. Please log in with your new password.',
-  });
+     clearRefreshCookie(res);
+     logger.info(`Password reset for user: ${user.id}`);
+     return res.status(STATUS_CODE.OK).json({
+       status: STATUS_MESSAGE.SUCCESS,
+       message: 'Password reset successfully. Please log in with your new password.',
+     });
 });
 
 
@@ -554,21 +541,31 @@ export const changePassword = catchAsync(async (req, res, next) => {
 
   // Update password and invalidate all refresh tokens
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: userId },
-      data: { passwordHash: newHash },
-    });
+       await tx.user.update({
+         where: { id: userId },
+         data: { passwordHash: newHash, sessionVersion: { increment: 1 } },
+       });
+       await tx.refreshToken.deleteMany({ where: { userId } });
+     });
 
-    await tx.refreshToken.deleteMany({ 
-      where: { userId } 
-    });
-  });
+
+
+     try {
+       const redis = await getRedisClient();
+       await redis.publish(`force_logout:${userId}`, 'logout');
+     } catch (err) {
+       logger.error(`Redis publish failed for user ${userId}: ${err.message}`);
+     }
+
+
+
 
   // Clear cookies
-  clearRefreshCookie(res);
-
+  
   logger.info(`Password changed for user: ${userId}`);
-
+  
+  clearRefreshCookie(res);
+  
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     message: 'Password changed successfully. Please log in again.',
@@ -626,20 +623,26 @@ export const refreshToken = catchAsync(async (req, res, next) => {
   }
 
   // Check if user exists and is active
-  const user = await prisma.user.findUnique({ 
-    where: { id: decoded.userId },
-    select: { id: true, isActive: true }
+  const userWithVersion = await prisma.user.findUnique({ 
+    where: { id: user.id },
+    select: { id: true, isActive: true, sessionVersion: true, userRoles: { include: { role: true } } }
   });
 
-  if (!user || !user.isActive) {
+
+
+  if (!userWithVersion || !userWithVersion.isActive) {
     await deleteRefreshToken(decoded.userId);
     clearRefreshCookie(res);
     return next(new ErrorResponse('User not found or inactive', STATUS_CODE.FORBIDDEN));
   }
 
   // Generate new tokens
-  const newAccessToken = generateAccessToken({ userId: user.id });
-  const newRefreshToken = generateRefreshToken({ userId: user.id });
+  const newAccessToken = generateAccessToken({ 
+    userId: userWithVersion.id, 
+    role: userWithVersion.userRoles, 
+    sessionVersion: userWithVersion.sessionVersion  // NEW
+  });
+  const newRefreshToken = generateRefreshToken({ userId: userWithVersion.id });
 
   // Update refresh token (token rotation)
   await setRefreshToken(user.id, newRefreshToken);
