@@ -24,6 +24,10 @@ export default async (req, res, next) => {
       select: { sessionVersion: true, isActive: true },
     });
 
+    console.log(user)
+
+    
+
     if (!user || !user.isActive) {
       return next(new ErrorResponse('User not found or inactive', STATUS_CODE.FORBIDDEN));
     }

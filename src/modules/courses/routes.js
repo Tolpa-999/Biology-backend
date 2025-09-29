@@ -9,7 +9,8 @@ import {
   enrollUserInCourse,
   removeUserFromCourse,
   getCourseStats,
-  getCourseLessons
+  getCourseLessons,
+  validateCourseCoupon
 } from './controller.js';
 import {
   createCourseSchema,
@@ -18,6 +19,7 @@ import {
   courseQuerySchema,
   enrollUserSchema,
   courseUsersQuerySchema,
+  validateCouponSchema,
 } from './schemas.js';
 import validateMiddleware from '../../middleware/validate.js';
 import authMiddleware from '../../middleware/auth.js';
@@ -27,6 +29,7 @@ import parseJsonFields from '../../middleware/parseJsonFieldls.js';
 
 import { upload } from "../../utils/uploadHandler.js";  // ✅ use global handler
 import { getAllLessons } from '../lessons/controller.js';
+import Joi from 'joi';
 
 const router = Router();
 
@@ -132,5 +135,14 @@ router.get(
   validateMiddleware(courseIdSchema, 'params'),
   getCourseStats
 );
+
+
+// Coupon validation for specific course
+router.post(
+  '/:id/coupons/validate',
+  validateMiddleware(validateCouponSchema, 'body'),
+  validateCourseCoupon
+);
+
 
 export default router;

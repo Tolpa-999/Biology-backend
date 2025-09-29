@@ -89,7 +89,7 @@ const createRedisClient = () => {
   });
 
   redisClient.on('ready', () => logger.info('Redis connected successfully'));
-  redisClient.on('error', (err) => logger.error(`Redis error: ${err.message}`));
+  redisClient.on('error', (err) => logger.error(`Redis error: ${err}`));
   redisClient.on('reconnecting', () => logger.info('Redis reconnecting...'));
   redisClient.on('end', () => logger.warn('Redis connection closed'));
 

@@ -23,12 +23,6 @@ async function main() {
 
   console.log('✅ Roles seeded successfully');
 
-    // ✅ Backfill sessionVersion
-  await prisma.user.updateMany({
-    where: { sessionVersion: null },
-    data: { sessionVersion: 0 },
-  });
-  console.log("✅ Backfilled sessionVersion for users");
 
 
    const users = await prisma.user.findMany();

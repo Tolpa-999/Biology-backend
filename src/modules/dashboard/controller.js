@@ -281,6 +281,43 @@ export const toggleUserRole = catchAsync(async (req, res, next) => {
 });
 
 
+export const deleteUser = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+
+  const user = await prisma.user.findUnique({
+    where: { id },
+    include: { files: true } // fetch related files if you want to delete from storage
+  });
+
+  if (!user) {
+    return next(new ErrorResponse('User not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // Optional: prevent self-deletion
+  if (id === req.user?.userId) {
+    return next(new ErrorResponse('Cannot delete your own account', STATUS_CODE.FORBIDDEN));
+  }
+
+  // Remove files from storage (if any)
+  if (user.files.length > 0) {
+    for (const file of user.files) {
+      // await deleteFileFromStorage(file.path); // implement this
+    }
+  }
+
+  // Delete user (cascade handles most dependencies)
+  await prisma.user.delete({ where: { id } });
+
+  logger.info(`Admin deleted user: ${id}`);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    message: 'User and related data deleted successfully'
+  });
+});
+
+
 
 
 export const getCourseStats = catchAsync(async (req, res, next) => {
@@ -582,3 +619,540 @@ export const getActivityLogs = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+
+// Helper function to update coupon status
+const updateCouponStatus = async (coupon) => {
+  const now = new Date();
+  let status = 'ACTIVE';
+
+  if (!coupon.isActive) {
+    status = 'INACTIVE';
+  } else if (coupon.maxUses && coupon.usedCount >= coupon.maxUses) {
+    status = 'USED_UP';
+  } else if (coupon.endDate && new Date(coupon.endDate) < now) {
+    status = 'EXPIRED';
+  } else if (coupon.startDate && new Date(coupon.startDate) > now) {
+    status = 'INACTIVE';
+  }
+
+  if (coupon.status !== status) {
+    await prisma.coupon.update({
+      where: { id: coupon.id },
+      data: { status }
+    });
+  }
+
+  return status;
+};
+
+
+export const createCoupon = catchAsync(async (req, res, next) => {
+  const {
+    code,
+    name,
+    description,
+    discountType,
+    discountValue,
+    maxUses,
+    maxUsesPerUser,
+    minPurchase,
+    startDate,
+    endDate,
+    isActive,
+    scope,
+    courseId,
+    lessonId,
+    validForUserIds,
+    excludedUserIds
+  } = req.body;
+
+  // Check if code already exists
+  const existingCoupon = await prisma.coupon.findUnique({
+    where: { code: code.toUpperCase() }
+  });
+
+  if (existingCoupon) {
+    return next(new ErrorResponse('Coupon code already exists', STATUS_CODE.CONFLICT));
+  }
+
+  // Validate course/lesson existence if scope is specified
+  if (scope === 'COURSE' && courseId) {
+    const course = await prisma.course.findUnique({ where: { id: courseId } });
+    if (!course) {
+      return next(new ErrorResponse('Course not found', STATUS_CODE.NOT_FOUND));
+    }
+  }
+
+  if (scope === 'LESSON' && lessonId) {
+    const lesson = await prisma.lesson.findUnique({ where: { id: lessonId } });
+    if (!lesson) {
+      return next(new ErrorResponse('Lesson not found', STATUS_CODE.NOT_FOUND));
+    }
+  }
+
+  const coupon = await prisma.coupon.create({
+    data: {
+      code: code.toUpperCase(),
+      name,
+      description,
+      discountType,
+      discountValue,
+      maxUses,
+      maxUsesPerUser,
+      minPurchase,
+      startDate: startDate ? new Date(startDate) : null,
+      endDate: endDate ? new Date(endDate) : null,
+      isActive,
+      scope,
+       // ✅ Correct way to link relations
+      course: scope === 'COURSE' && courseId ? { connect: { id: courseId } } : undefined,
+      lesson: scope === 'LESSON' && lessonId ? { connect: { id: lessonId } } : undefined,
+      createdBy: { connect: { id: req.user.userId } },
+
+      // ✅ Relations with users
+      validForUsers: validForUserIds ? {
+        connect: validForUserIds.map(id => ({ id }))
+      } : undefined,
+
+      excludedUsers: excludedUserIds ? {
+        connect: excludedUserIds.map(id => ({ id }))
+      } : undefined
+    },
+    include: {
+      course: true,
+      lesson: true,
+      validForUsers: true,
+      excludedUsers: true
+    }
+  });
+
+  return res.status(STATUS_CODE.CREATED).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { coupon }
+  });
+});
+
+export const updateCoupon = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const updateData = req.body;
+
+  // Check if coupon exists
+  const coupon = await prisma.coupon.findUnique({
+    where: { id }
+  });
+
+  if (!coupon) {
+    return next(new ErrorResponse('Coupon not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // If code is being updated, check for uniqueness
+  if (updateData.code) {
+    const existingCoupon = await prisma.coupon.findFirst({
+      where: {
+        code: updateData.code.toUpperCase(),
+        id: { not: id }
+      }
+    });
+
+    if (existingCoupon) {
+      return next(new ErrorResponse('Coupon code already exists', STATUS_CODE.CONFLICT));
+    }
+    updateData.code = updateData.code.toUpperCase();
+  }
+
+  const updatedCoupon = await prisma.coupon.update({
+    where: { id },
+    data: {
+      ...updateData,
+      validForUsers: updateData.validForUserIds ? {
+        set: updateData.validForUserIds.map(id => ({ id }))
+      } : undefined,
+      excludedUsers: updateData.excludedUserIds ? {
+        set: updateData.excludedUserIds.map(id => ({ id }))
+      } : undefined
+    },
+    include: {
+      course: true,
+      lesson: true,
+      validForUsers: true,
+      excludedUsers: true
+    }
+  });
+
+  // Update status
+  await updateCouponStatus(updatedCoupon);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { coupon: updatedCoupon }
+  });
+});
+
+export const toggleCouponStatus = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { id }
+  });
+
+  if (!coupon) {
+    return next(new ErrorResponse('Coupon not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  const updatedCoupon = await prisma.coupon.update({
+    where: { id },
+    data: { isActive: !coupon.isActive }
+  });
+
+  // Update status
+  await updateCouponStatus(updatedCoupon);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { coupon: updatedCoupon }
+  });
+});
+
+export const getAllCoupons = catchAsync(async (req, res, next) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const { search, status, scope, discountType, fromDate, toDate } = req.query;
+
+  const skip = (page - 1) * limit;
+
+  const where = {
+    ...(search && {
+      OR: [
+        { code: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } }
+      ]
+    }),
+    ...(status && { status }),
+    ...(scope && { scope }),
+    ...(discountType && { discountType }),
+    ...(fromDate && { createdAt: { gte: new Date(fromDate) } }),
+    ...(toDate && { createdAt: { lte: new Date(toDate) } }),
+  };
+
+  const [coupons, totalCount] = await Promise.all([
+    prisma.coupon.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        course: { select: { id: true, title: true } },
+        lesson: { select: { id: true, title: true } },
+        createdBy: { select: { firstName: true, middleName: true, lastName: true } },
+        _count: { select: { enrollments: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    }),
+    prisma.coupon.count({ where })
+  ]);
+
+  // Update status for each coupon
+  for (const coupon of coupons) {
+    await updateCouponStatus(coupon);
+  }
+
+  const totalPages = Math.ceil(totalCount / limit);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: {
+      coupons,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalCount,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    }
+  });
+});
+
+export const getCouponStats = catchAsync(async (req, res, next) => {
+  const { fromDate, toDate } = req.query;
+
+  const where = {
+    ...(fromDate && { createdAt: { gte: new Date(fromDate) } }),
+    ...(toDate && { createdAt: { lte: new Date(toDate) } }),
+  };
+
+  const [
+    totalCoupons,
+    activeCoupons,
+    couponsByScope,
+    couponsByStatus,
+    totalDiscountGiven,
+    topCoupons
+  ] = await Promise.all([
+    prisma.coupon.count({ where }),
+    prisma.coupon.count({ where: { ...where, status: 'ACTIVE' } }),
+    prisma.coupon.groupBy({
+      by: ['scope'],
+      where,
+      _count: { id: true }
+    }),
+    prisma.coupon.groupBy({
+      by: ['status'],
+      where,
+      _count: { id: true }
+    }),
+    prisma.enrollment.aggregate({
+      where: {
+        ...where,
+        couponId: { not: null },
+        status: 'ACTIVE'
+      },
+      _sum: { amountPaid: true }
+    }),
+    prisma.coupon.findMany({
+      take: 5,
+      where: { enrollments: { some: {} } },
+      include: {
+        _count: { select: { enrollments: true } },
+        enrollments: {
+          select: { amountPaid: true }
+        }
+      },
+      orderBy: { enrollments: { _count: 'desc' } }
+    })
+  ]);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: {
+      totalCoupons,
+      activeCoupons,
+      couponsByScope: couponsByScope.map(item => ({ scope: item.scope, count: item._count.id })),
+      couponsByStatus: couponsByStatus.map(item => ({ status: item.status, count: item._count.id })),
+      totalDiscountGiven: totalDiscountGiven._sum.amountPaid || 0,
+      topCoupons: topCoupons.map(coupon => ({
+        id: coupon.id,
+        code: coupon.code,
+        usageCount: coupon._count.enrollments,
+        totalRevenue: coupon.enrollments.reduce((sum, e) => sum + e.amountPaid, 0)
+      }))
+    }
+  });
+});
+
+export const getCouponDetails = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { id },
+    include: {
+      course: { select: { id: true, title: true } },
+      lesson: { select: { id: true, title: true } },
+      createdBy: { select: { firstName: true, middleName: true, lastName: true } },
+      validForUsers: { select: { id: true, firstName: true, lastName: true, email: true } },
+      excludedUsers: { select: { id: true, firstName: true, lastName: true, email: true } },
+      enrollments: {
+        include: {
+          user: { select: { firstName: true, lastName: true, email: true } },
+          course: { select: { title: true } }
+        },
+        orderBy: { startedAt: 'desc' }
+      },
+      _count: { select: { enrollments: true } }
+    }
+  });
+
+  if (!coupon) {
+    return next(new ErrorResponse('Coupon not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // Update status
+  await updateCouponStatus(coupon);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { coupon }
+  });
+});
+
+
+export const deleteCoupon = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { id }
+  });
+
+  if (!coupon) {
+    return next(new ErrorResponse('Coupon not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // Check if coupon has been used
+  if (coupon.usedCount > 0) {
+    return next(new ErrorResponse('Cannot delete coupon that has been used', STATUS_CODE.BAD_REQUEST));
+  }
+
+  await prisma.coupon.delete({
+    where: { id }
+  });
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    message: 'Coupon deleted successfully'
+  });
+});
+
+export const validateCoupon = catchAsync(async (req, res, next) => {
+  const { code, courseId, lessonId, amount } = req.body;
+  const userId = req.user.userId
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { code: code.toUpperCase() },
+    include: {
+      validForUsers: { select: { id: true } },
+      excludedUsers: { select: { id: true } }
+    }
+  });
+
+  if (!coupon) {
+    return next(new ErrorResponse('Invalid coupon code', STATUS_CODE.NOT_FOUND));
+  }
+
+  // Update status first
+  await updateCouponStatus(coupon);
+
+  // Check if coupon is active
+  if (coupon.status !== 'ACTIVE') {
+    return next(new ErrorResponse('Coupon is not active', STATUS_CODE.BAD_REQUEST));
+  }
+
+  // Check scope
+  if (coupon.scope === 'COURSE' && coupon.courseId !== courseId) {
+    return next(new ErrorResponse('Coupon is not valid for this course', STATUS_CODE.BAD_REQUEST));
+  }
+
+  if (coupon.scope === 'LESSON' && coupon.lessonId !== lessonId) {
+    return next(new ErrorResponse('Coupon is not valid for this lesson', STATUS_CODE.BAD_REQUEST));
+  }
+
+  // Check minimum purchase
+  if (coupon.minPurchase && amount < coupon.minPurchase) {
+    return next(new ErrorResponse(`Minimum purchase of ${coupon.minPurchase} required`, STATUS_CODE.BAD_REQUEST));
+  }
+
+  // Check user restrictions
+  if (coupon.validForUsers.length > 0) {
+    const isValidUser = coupon.validForUsers.some(user => user.id === userId);
+    if (!isValidUser) {
+      return next(new ErrorResponse('Coupon is not valid for this user', STATUS_CODE.BAD_REQUEST));
+    }
+  }
+
+  if (coupon.excludedUsers.length > 0) {
+    const isExcluded = coupon.excludedUsers.some(user => user.id === userId);
+    if (isExcluded) {
+      return next(new ErrorResponse('Coupon is not valid for this user', STATUS_CODE.BAD_REQUEST));
+    }
+  }
+
+  // Check max uses per user
+  if (coupon.maxUsesPerUser) {
+    const userUsageCount = await prisma.enrollment.count({
+      where: {
+        userId,
+        couponId: coupon.id
+      }
+    });
+
+    if (userUsageCount >= coupon.maxUsesPerUser) {
+      return next(new ErrorResponse('Coupon usage limit reached for this user', STATUS_CODE.BAD_REQUEST));
+    }
+  }
+
+  // Calculate discount
+  let discountAmount = 0;
+  if (coupon.discountType === 'PERCENTAGE') {
+    discountAmount = (amount * coupon.discountValue) / 100;
+  } else {
+    discountAmount = Math.min(coupon.discountValue, amount);
+  }
+
+  const finalAmount = amount - discountAmount;
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: {
+      valid: true,
+      coupon: {
+        id: coupon.id,
+        code: coupon.code,
+        name: coupon.name,
+        discountType: coupon.discountType,
+        discountValue: coupon.discountValue,
+        discountAmount,
+        finalAmount
+      }
+    }
+  });
+});
+
+
+export const getCourseCoupons = catchAsync(async (req, res, next) => {
+  const { id: courseId } = req.params;
+  const { page = 1, limit = 10, status } = req.query;
+
+  const pageNumber = parseInt(page);
+  const limitNumber = parseInt(limit);
+  const skip = (pageNumber - 1) * limitNumber;
+
+  // Verify course exists
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { id: true, title: true }
+  });
+
+  if (!course) {
+    return next(new ErrorResponse('Course not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  const where = {
+    OR: [
+      { scope: 'GLOBAL' },
+      { scope: 'COURSE', courseId }
+    ],
+    ...(status && { status })
+  };
+
+  const [coupons, totalCount] = await Promise.all([
+    prisma.coupon.findMany({
+      where,
+      skip,
+      take: limitNumber,
+      include: {
+        course: { select: { title: true } },
+        createdBy: { select: { firstName: true, lastName: true } },
+        _count: { select: { enrollments: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    }),
+    prisma.coupon.count({ where })
+  ]);
+
+  const totalPages = Math.ceil(totalCount / limitNumber);
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: {
+      coupons,
+      pagination: {
+        currentPage: pageNumber,
+        totalPages,
+        totalCount,
+        hasNext: pageNumber < totalPages,
+        hasPrev: pageNumber > 1
+      }
+    }
+  });
+});
+

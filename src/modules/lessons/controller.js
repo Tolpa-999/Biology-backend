@@ -397,28 +397,28 @@ export const getLessonById = catchAsync(async (req, res, next) => {
   }
 
   // Check if lesson contains paid content and user doesn't have access
-  if (userId) {
-    const hasPaidContent = lesson.contents.some(content => !content.isFree);
+  // if (userId) {
+  //   const hasPaidContent = lesson.contents.some(content => !content.isFree);
     
-    if (hasPaidContent) {
-      const hasAccess = await hasAccessToPaidContent(userId, lesson.course.id, id);
+  //   if (hasPaidContent) {
+  //     const hasAccess = await hasAccessToPaidContent(userId, lesson.course.id, id);
       
-      if (!hasAccess) {
-        return next(
-          new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
-        );
-      }
-    }
-  } else {
-    // Anonymous user - check if lesson contains paid content
-    const hasPaidContent = lesson.contents.some(content => !content.isFree);
+  //     if (!hasAccess) {
+  //       return next(
+  //         new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
+  //       );
+  //     }
+  //   }
+  // } else {
+  //   // Anonymous user - check if lesson contains paid content
+  //   const hasPaidContent = lesson.contents.some(content => !content.isFree);
     
-    if (hasPaidContent) {
-      return next(
-        new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
-      );
-    }
-  }
+  //   if (hasPaidContent) {
+  //     return next(
+  //       new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
+  //     );
+  //   }
+  // }
 
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
@@ -453,30 +453,30 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
   });
 
   // Check if lesson contains paid content and user doesn't have access
-  if (userId) {
-    const hasPaidContent = contents.some(content => !content.isFree);
+  // if (userId) {
+  //   const hasPaidContent = contents.some(content => !content.isFree);
     
-    if (hasPaidContent) {
-      const hasAccess = await hasAccessToPaidContent(userId, lesson.courseId, id);
+  //   if (hasPaidContent) {
+  //     const hasAccess = await hasAccessToPaidContent(userId, lesson.courseId, id);
 
-      console.log("hasAccess   => ", hasAccess)
+  //     console.log("hasAccess   => ", hasAccess)
       
-      if (!hasAccess) {
-        return next(
-          new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
-        );
-      }
-    }
-  } else {
-    // Anonymous user - check if lesson contains paid content
-    const hasPaidContent = contents.some(content => !content.isFree);
+  //     if (!hasAccess) {
+  //       return next(
+  //         new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
+  //       );
+  //     }
+  //   }
+  // } else {
+  //   // Anonymous user - check if lesson contains paid content
+  //   const hasPaidContent = contents.some(content => !content.isFree);
     
-    if (hasPaidContent) {
-      return next(
-        new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
-      );
-    }
-  }
+  //   if (hasPaidContent) {
+  //     return next(
+  //       new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
+  //     );
+  //   }
+  // }
 
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,

@@ -132,8 +132,15 @@ export const login = catchAsync(async (req, res, next) => {
 
   // NEW: Publish force_logout to invalidate other sessions (real-time)
   const redis = await getRedisClient();
-  await redis.publish(`user:${updatedUser.id}`, JSON.stringify({ event: 'force_logout' }));
-  logger.info(`Published ----------------- force_logout to user:${updatedUser.id}`);
+  
+  await redis.publish(`user:force_logout`, JSON.stringify({ 
+  event: 'force_logout',
+  userId: updatedUser.id,
+  timestamp: new Date().toISOString(),
+  reason: 'New login from different device'
+}));
+logger.info(`Published force_logout to user:force_logout channel for user:${updatedUser.id}`);
+
 
   const { passwordHash, sessionVersion, ...userWithoutSensitive } = updatedUser;
 
@@ -151,75 +158,180 @@ export const login = catchAsync(async (req, res, next) => {
 
 
 export const signup = catchAsync(async (req, res, next) => {
-  const { phone, email, password, firstName, lastName, academicStage, parentPhone, ...otherData } = req.body;
+  const {
+    phone,
+    email,
+    password,
+    firstName,
+    lastName,
+    academicStage,
+    parentPhone,
+    ...otherData
+  } = req.body;
 
-  // Validate parentPhone against phone
-  if (phone === parentPhone) {
-    return next(new ErrorResponse('مينفعش رقمك يكون نفس رقم ولي الأمر', STATUS_CODE.CONFLICT));
+  // basic validation
+  if (!phone || !password || !firstName || !lastName) {
+    return next(new ErrorResponse("Missing required fields", STATUS_CODE.BAD_REQUEST));
   }
 
-  // Check if user already exists
+  // parent phone cannot equal user phone
+  if (phone === parentPhone) {
+    return next(new ErrorResponse("مينفعش رقمك يكون نفس رقم ولي الأمر", STATUS_CODE.CONFLICT));
+  }
+
+  // validate email if provided
+  if (email && (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return next(new ErrorResponse("Invalid email address", STATUS_CODE.BAD_REQUEST));
+  }
+
+  // Hash password up front (used for create OR update)
+  const passwordHash = await hashPassword(password);
+
+  // Find any existing user by phone OR email (if provided)
   const existingUser = await prisma.user.findFirst({
-    where: { 
+    where: {
       OR: [
-        { phone }, 
-        ...(email ? [{ email }] : [])
-      ] 
+        { phone },
+        ...(email ? [{ email }] : []),
+      ],
     },
   });
 
+  // If user exists, handle unverified repeat-signup vs conflict
   if (existingUser) {
-    return next(new ErrorResponse('User already exists', STATUS_CODE.CONFLICT));
+    // If either email OR phone is already verified => treat as existing account (conflict)
+    const phoneVerified = Boolean(existingUser.phoneVerified);
+    const emailVerified = Boolean(existingUser.emailVerified);
+    if (phoneVerified || emailVerified) {
+      return next(new ErrorResponse("User already exists", STATUS_CODE.CONFLICT));
+    }
+
+    // At this point: existing user is NOT verified => allow overwrite/update and resend verification
+    // BUT we must ensure the provided email/phone are not taken by another user (race case)
+    if (email && existingUser.email !== email) {
+      const otherByEmail = await prisma.user.findUnique({ where: { email } });
+      if (otherByEmail && otherByEmail.id !== existingUser.id) {
+        return next(new ErrorResponse("Email already in use", STATUS_CODE.CONFLICT));
+      }
+    }
+    if (phone && existingUser.phone !== phone) {
+      const otherByPhone = await prisma.user.findUnique({ where: { phone } });
+      if (otherByPhone && otherByPhone.id !== existingUser.id) {
+        return next(new ErrorResponse("Phone already in use", STATUS_CODE.CONFLICT));
+      }
+    }
+
+    // Update the existing user inside a transaction to avoid partial state
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: existingUser.id },
+        data: {
+          firstName,
+          lastName,
+          phone,
+          email: email || null,
+          passwordHash,
+          academicStage,
+          parentPhone,
+          isActive: true,
+          ...otherData,
+        },
+      });
+
+      // Ensure the student role exists for this user (do not duplicate)
+      const studentRole = await tx.role.findUnique({ where: { name: "STUDENT" } });
+      if (studentRole) {
+        const userRole = await tx.userRole.findUnique({
+          where: { userId_roleId: { userId: user.id, roleId: studentRole.id } },
+        });
+        if (!userRole) {
+          await tx.userRole.create({
+            data: {
+              userId: user.id,
+              roleId: studentRole.id,
+            },
+          });
+        }
+      }
+
+      return user;
+    });
+
+    // If email provided, (re)send verification email and create a verification token
+    if (email) {
+      try {
+        const code = await sendVerificationEmail(updatedUser);
+        await createVerificationToken(
+          updatedUser.id,
+          "EMAIL_VERIFICATION",
+          code,
+          VERIFICATION_CODE_EXPIRY_MINUTES
+        );
+      } catch (err) {
+        // Log but do not fail the whole signup - user can retry sending verification separately
+        logger.error(`Failed to send verification email for user ${updatedUser.id}: ${err?.message || err}`);
+      }
+    }
+
+    // Remove password hash from response
+    const { passwordHash: _, ...safeUser } = updatedUser;
+
+    logger.info(`Unverified user re-signed up and updated: ${updatedUser.phone}`);
+
+    return res.status(STATUS_CODE.OK).json({
+      status: STATUS_MESSAGE.SUCCESS,
+      data: {
+        user: safeUser,
+        expiresIn: process.env.JWT_ACCESS_EXPIRY || "15m",
+      },
+      message: email
+        ? "تم تحديث الحساب غير المُفعل وإعادة إرسال رمز التحقق إلى البريد الإلكتروني."
+        : "تم تحديث الحساب غير المُفعل. لم يتم توفير بريد إلكتروني للتهقق.",
+    });
   }
 
-  // Validate email if provided
-  if (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-    return next(new ErrorResponse('Invalid email address', STATUS_CODE.BAD_REQUEST));
-  }
-
-  // Hash password
-  const passwordHash = await hashPassword(password);
-
-  // Create user with transaction
+  // No existing user -> create new one
   const newUser = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
-      data: { 
+      data: {
         firstName,
         lastName,
-        phone, 
-        email: email || null, // Store null if email is not provided
-        passwordHash, 
+        phone,
+        email: email || null,
+        passwordHash,
         academicStage,
         parentPhone,
         isActive: true,
-        ...otherData 
+        ...otherData,
       },
     });
 
-    // Assign student role by default
-    await tx.userRole.create({
-      data: {
-        user: { connect: { id: user.id } },
-        role: { connect: { name: 'STUDENT' } }
-      }
-    });
+    // Assign default student role
+    const studentRole = await tx.role.findUnique({ where: { name: "STUDENT" } });
+    if (studentRole) {
+      await tx.userRole.create({
+        data: {
+          userId: user.id,
+          roleId: studentRole.id,
+        },
+      });
+    }
 
     return user;
   });
 
-  // If email provided, send verification code
+  // Send verification email if email provided
   if (email) {
     try {
       const code = await sendVerificationEmail(newUser);
-      await createVerificationToken(newUser.id, 'EMAIL_VERIFICATION', code, VERIFICATION_CODE_EXPIRY_MINUTES);
+      await createVerificationToken(newUser.id, "EMAIL_VERIFICATION", code, VERIFICATION_CODE_EXPIRY_MINUTES);
     } catch (error) {
-      // Log error but continue signup process
-      logger.error(`Failed to send verification email for user ${newUser.id}: ${error.message}`);
+      logger.error(`Failed to send verification email for user ${newUser.id}: ${error?.message || error}`);
+      // continuing signup even if email sending fails
     }
   }
 
-  // Remove sensitive data
-  const { passwordHash: _, ...userWithoutPassword } = newUser;
+  const { passwordHash: __, ...userWithoutPassword } = newUser;
 
   logger.info(`New user registered: ${newUser.phone}`);
 
@@ -227,13 +339,14 @@ export const signup = catchAsync(async (req, res, next) => {
     status: STATUS_MESSAGE.SUCCESS,
     data: {
       user: userWithoutPassword,
-      expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m'
+      expiresIn: process.env.JWT_ACCESS_EXPIRY || "15m",
     },
-    message: email 
-      ? 'Signup successful. A verification code has been sent to your email.'
-      : 'Signup successful. No email provided, so verification is not required.',
+    message: email
+      ? "Signup successful. A verification code has been sent to your email."
+      : "Signup successful. No email provided, so verification is not required.",
   });
 });
+
 
 export const verifyEmail = catchAsync(async (req, res, next) => {
   const { email, code } = req.body;
@@ -330,7 +443,7 @@ const existingUser = await prisma.user.findUnique({ where: { email } });
 export const forgotPassword = catchAsync(async (req, res, next) => {
   const { email } = req.body;
 
-  const user = await prisma.user.ue({
+  const user = await prisma.user.findFirst({
     where: { email },
   });
 
@@ -436,6 +549,7 @@ const verifyTelegramData = (data, botToken) => {
 };
 
 // Telegram authentication endpoint
+
 export const telegramAuth = catchAsync(async (req, res, next) => {
   const { id, first_name, last_name, username, photo_url, auth_date, hash } = req.body;
 
@@ -624,7 +738,7 @@ export const refreshToken = catchAsync(async (req, res, next) => {
 
   // Check if user exists and is active
   const userWithVersion = await prisma.user.findUnique({ 
-    where: { id: user.id },
+    where: { id: decoded.userId },
     select: { id: true, isActive: true, sessionVersion: true, userRoles: { include: { role: true } } }
   });
 

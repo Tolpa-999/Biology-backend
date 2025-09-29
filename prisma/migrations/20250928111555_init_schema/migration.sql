@@ -1,4 +1,10 @@
 -- CreateEnum
+CREATE TYPE "public"."FileCategory" AS ENUM ('USER', 'COURSE', 'DOCUMENT', 'QUIZ');
+
+-- CreateEnum
+CREATE TYPE "public"."FileType" AS ENUM ('IMAGE', 'PDF', 'VIDEO');
+
+-- CreateEnum
 CREATE TYPE "public"."RoleType" AS ENUM ('ADMIN', 'TEACHER', 'STUDENT', 'CENTER_ADMIN', 'PARENT');
 
 -- CreateEnum
@@ -14,13 +20,58 @@ CREATE TYPE "public"."EnrollmentStatus" AS ENUM ('ACTIVE', 'EXPIRED', 'REFUNDED'
 CREATE TYPE "public"."PaymentStatus" AS ENUM ('INITIATED', 'PAID', 'FAILED', 'EXPIRED', 'REFUNDED');
 
 -- CreateEnum
-CREATE TYPE "public"."PaymentProvider" AS ENUM ('FAWRY', 'WALLET', 'CASH');
+CREATE TYPE "public"."PaymentProvider" AS ENUM ('FAWRY', 'WALLET', 'CASH', 'MANUAL', 'CARD');
 
 -- CreateEnum
 CREATE TYPE "public"."ContentType" AS ENUM ('VIDEO', 'PDF', 'IMAGE', 'TEXT', 'QUIZ');
 
 -- CreateEnum
-CREATE TYPE "public"."QuestionType" AS ENUM ('MCQ_TEXT', 'MCQ_IMAGE');
+CREATE TYPE "public"."QuestionType" AS ENUM ('MCQ_TEXT', 'MCQ_IMAGE', 'ESSAY');
+
+-- CreateEnum
+CREATE TYPE "public"."VerificationType" AS ENUM ('EMAIL_VERIFICATION', 'PASSWORD_RESET');
+
+-- CreateEnum
+CREATE TYPE "public"."DiscountType" AS ENUM ('PERCENTAGE', 'FIXED_AMOUNT');
+
+-- CreateEnum
+CREATE TYPE "public"."CouponScope" AS ENUM ('GLOBAL', 'COURSE', 'LESSON');
+
+-- CreateEnum
+CREATE TYPE "public"."CouponStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'EXPIRED', 'USED_UP');
+
+-- CreateEnum
+CREATE TYPE "public"."CouponUsageStatus" AS ENUM ('PENDING', 'COMPLETED', 'FAILED');
+
+-- CreateTable
+CREATE TABLE "public"."File" (
+    "id" TEXT NOT NULL,
+    "category" "public"."FileCategory" NOT NULL,
+    "type" "public"."FileType" NOT NULL,
+    "userId" TEXT,
+    "courseId" TEXT,
+    "originalName" TEXT NOT NULL,
+    "storedName" TEXT,
+    "path" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "size" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "quizId" TEXT,
+
+    CONSTRAINT "File_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."verification_tokens" (
+    "id" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "type" "public"."VerificationType" NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "verification_tokens_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "public"."users" (
@@ -31,20 +82,35 @@ CREATE TABLE "public"."users" (
     "middleName" TEXT,
     "lastName" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
+    "parentPhone" TEXT NOT NULL,
     "email" TEXT,
     "gender" "public"."Gender",
     "location" TEXT,
     "academicStage" "public"."AcademicStage" NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "telegramId" TEXT,
+    "telegramUsername" TEXT,
+    "telegramAuthDate" TIMESTAMP(3),
     "isActive" BOOLEAN NOT NULL DEFAULT false,
     "emailVerified" BOOLEAN NOT NULL DEFAULT false,
     "phoneVerified" BOOLEAN NOT NULL DEFAULT false,
     "avatar" TEXT,
     "lastLogin" TIMESTAMP(3),
     "themePreference" TEXT NOT NULL DEFAULT 'light',
+    "sessionVersion" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."RefreshToken" (
+    "id" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -61,6 +127,22 @@ CREATE TABLE "public"."user_roles" (
     "roleId" TEXT NOT NULL,
 
     CONSTRAINT "user_roles_pkey" PRIMARY KEY ("userId","roleId")
+);
+
+-- CreateTable
+CREATE TABLE "public"."login_events" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "ip" TEXT NOT NULL,
+    "userAgent" TEXT NOT NULL,
+    "os" TEXT,
+    "device" TEXT,
+    "city" TEXT,
+    "country" TEXT,
+    "success" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "login_events_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -126,6 +208,11 @@ CREATE TABLE "public"."lessons" (
     "isPublished" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "centerId" TEXT,
+    "price" DOUBLE PRECISION,
+    "discountPrice" DOUBLE PRECISION,
+    "requiresQuizPass" BOOLEAN NOT NULL DEFAULT false,
+    "passThreshold" DOUBLE PRECISION NOT NULL DEFAULT 50.0,
 
     CONSTRAINT "lessons_pkey" PRIMARY KEY ("id")
 );
@@ -136,12 +223,14 @@ CREATE TABLE "public"."contents" (
     "lessonId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "type" "public"."ContentType" NOT NULL,
-    "contentUrl" TEXT NOT NULL,
+    "contentUrl" TEXT,
     "duration" INTEGER,
+    "isPublished" BOOLEAN NOT NULL DEFAULT false,
     "order" INTEGER NOT NULL,
     "isFree" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "bunnyVideoGuid" TEXT,
 
     CONSTRAINT "contents_pkey" PRIMARY KEY ("id")
 );
@@ -160,14 +249,31 @@ CREATE TABLE "public"."enrollments" (
     "centerCodeId" TEXT,
     "amountPaid" DOUBLE PRECISION NOT NULL,
     "paymentId" TEXT,
+    "updatedAt" TIMESTAMP(3),
 
     CONSTRAINT "enrollments_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
+CREATE TABLE "public"."lesson_enrollments" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "lessonId" TEXT NOT NULL,
+    "enrollmentId" TEXT,
+    "status" "public"."EnrollmentStatus" NOT NULL DEFAULT 'PENDING',
+    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" TIMESTAMP(3),
+    "amountPaid" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "paymentId" TEXT,
+
+    CONSTRAINT "lesson_enrollments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "public"."lesson_progress" (
     "id" TEXT NOT NULL,
-    "enrollmentId" TEXT NOT NULL,
+    "enrollmentId" TEXT,
+    "lessonEnrollmentId" TEXT,
     "lessonId" TEXT NOT NULL,
     "completed" BOOLEAN NOT NULL DEFAULT false,
     "progress" DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -180,7 +286,8 @@ CREATE TABLE "public"."lesson_progress" (
 -- CreateTable
 CREATE TABLE "public"."quizzes" (
     "id" TEXT NOT NULL,
-    "lessonId" TEXT NOT NULL,
+    "lessonId" TEXT,
+    "courseId" TEXT,
     "title" TEXT NOT NULL,
     "description" TEXT,
     "timeLimit" INTEGER,
@@ -188,6 +295,8 @@ CREATE TABLE "public"."quizzes" (
     "isPublished" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "passingScore" DOUBLE PRECISION NOT NULL DEFAULT 60,
+    "passThreshold" DOUBLE PRECISION DEFAULT 70.0,
 
     CONSTRAINT "quizzes_pkey" PRIMARY KEY ("id")
 );
@@ -204,6 +313,7 @@ CREATE TABLE "public"."questions" (
     "points" INTEGER NOT NULL DEFAULT 1,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "modelAnswer" TEXT,
 
     CONSTRAINT "questions_pkey" PRIMARY KEY ("id")
 );
@@ -212,9 +322,9 @@ CREATE TABLE "public"."questions" (
 CREATE TABLE "public"."choices" (
     "id" TEXT NOT NULL,
     "questionId" TEXT NOT NULL,
-    "text" TEXT NOT NULL,
+    "text" TEXT,
     "isCorrect" BOOLEAN NOT NULL DEFAULT false,
-    "order" INTEGER NOT NULL,
+    "imageUrl" TEXT,
 
     CONSTRAINT "choices_pkey" PRIMARY KEY ("id")
 );
@@ -247,7 +357,8 @@ CREATE TABLE "public"."quiz_answers" (
 -- CreateTable
 CREATE TABLE "public"."homeworks" (
     "id" TEXT NOT NULL,
-    "lessonId" TEXT NOT NULL,
+    "lessonId" TEXT,
+    "courseId" TEXT,
     "title" TEXT NOT NULL,
     "description" TEXT,
     "dueDate" TIMESTAMP(3),
@@ -303,22 +414,6 @@ CREATE TABLE "public"."payment_logs" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."login_events" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "ip" TEXT NOT NULL,
-    "userAgent" TEXT NOT NULL,
-    "os" TEXT,
-    "device" TEXT,
-    "city" TEXT,
-    "country" TEXT,
-    "success" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "login_events_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "public"."wallets" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -342,25 +437,6 @@ CREATE TABLE "public"."wallet_transactions" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "wallet_transactions_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "public"."coupons" (
-    "id" TEXT NOT NULL,
-    "code" TEXT NOT NULL,
-    "discountType" TEXT NOT NULL,
-    "discountValue" DOUBLE PRECISION NOT NULL,
-    "maxUses" INTEGER,
-    "usedCount" INTEGER NOT NULL DEFAULT 0,
-    "minPurchase" DOUBLE PRECISION,
-    "startDate" TIMESTAMP(3),
-    "endDate" TIMESTAMP(3),
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "courseId" TEXT,
-
-    CONSTRAINT "coupons_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -430,6 +506,77 @@ CREATE TABLE "public"."forum_votes" (
     CONSTRAINT "forum_votes_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "public"."Upload" (
+    "id" SERIAL NOT NULL,
+    "guid" TEXT NOT NULL,
+    "uploadUrl" TEXT NOT NULL,
+    "lessonId" TEXT,
+    "userId" INTEGER,
+    "fileName" TEXT,
+    "fileSize" INTEGER,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Upload_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."coupons" (
+    "id" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "name" TEXT,
+    "description" TEXT,
+    "discountType" "public"."DiscountType" NOT NULL,
+    "discountValue" DOUBLE PRECISION NOT NULL,
+    "maxUses" INTEGER,
+    "maxUsesPerUser" INTEGER,
+    "usedCount" INTEGER NOT NULL DEFAULT 0,
+    "minPurchase" DOUBLE PRECISION,
+    "startDate" TIMESTAMP(3),
+    "endDate" TIMESTAMP(3),
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "scope" "public"."CouponScope" NOT NULL DEFAULT 'GLOBAL',
+    "status" "public"."CouponStatus" NOT NULL DEFAULT 'ACTIVE',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "courseId" TEXT,
+    "lessonId" TEXT,
+
+    CONSTRAINT "coupons_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."coupon_usages" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "couponId" TEXT NOT NULL,
+    "count" INTEGER NOT NULL DEFAULT 0,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "coupon_usages_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."_ValidCoupons" (
+    "A" TEXT NOT NULL,
+    "B" TEXT NOT NULL,
+
+    CONSTRAINT "_ValidCoupons_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateTable
+CREATE TABLE "public"."_ExcludedCoupons" (
+    "A" TEXT NOT NULL,
+    "B" TEXT NOT NULL,
+
+    CONSTRAINT "_ExcludedCoupons_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "verification_tokens_userId_type_key" ON "public"."verification_tokens"("userId", "type");
+
 -- CreateIndex
 CREATE UNIQUE INDEX "users_phone_key" ON "public"."users"("phone");
 
@@ -437,7 +584,7 @@ CREATE UNIQUE INDEX "users_phone_key" ON "public"."users"("phone");
 CREATE UNIQUE INDEX "users_email_key" ON "public"."users"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "users_telegramId_key" ON "public"."users"("telegramId");
+CREATE UNIQUE INDEX "RefreshToken_token_key" ON "public"."RefreshToken"("token");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "roles_name_key" ON "public"."roles"("name");
@@ -446,22 +593,73 @@ CREATE UNIQUE INDEX "roles_name_key" ON "public"."roles"("name");
 CREATE UNIQUE INDEX "center_codes_code_key" ON "public"."center_codes"("code");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "lesson_progress_enrollmentId_lessonId_key" ON "public"."lesson_progress"("enrollmentId", "lessonId");
+CREATE UNIQUE INDEX "lesson_enrollments_userId_lessonId_key" ON "public"."lesson_enrollments"("userId", "lessonId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "lesson_progress_enrollmentId_lessonId_lessonEnrollmentId_key" ON "public"."lesson_progress"("enrollmentId", "lessonId", "lessonEnrollmentId");
+
+-- CreateIndex
+CREATE INDEX "questions_quizId_order_idx" ON "public"."questions"("quizId", "order");
+
+-- CreateIndex
+CREATE INDEX "quiz_submissions_quizId_userId_idx" ON "public"."quiz_submissions"("quizId", "userId");
+
+-- CreateIndex
+CREATE INDEX "quiz_submissions_completedAt_idx" ON "public"."quiz_submissions"("completedAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "wallets_userId_key" ON "public"."wallets"("userId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "forum_votes_postId_userId_key" ON "public"."forum_votes"("postId", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Upload_guid_key" ON "public"."Upload"("guid");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "coupons_code_key" ON "public"."coupons"("code");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "forum_votes_postId_userId_key" ON "public"."forum_votes"("postId", "userId");
+CREATE INDEX "coupons_code_idx" ON "public"."coupons"("code");
+
+-- CreateIndex
+CREATE INDEX "coupons_status_idx" ON "public"."coupons"("status");
+
+-- CreateIndex
+CREATE INDEX "coupons_startDate_endDate_idx" ON "public"."coupons"("startDate", "endDate");
+
+-- CreateIndex
+CREATE INDEX "coupons_createdById_idx" ON "public"."coupons"("createdById");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "coupon_usages_couponId_userId_key" ON "public"."coupon_usages"("couponId", "userId");
+
+-- CreateIndex
+CREATE INDEX "_ValidCoupons_B_index" ON "public"."_ValidCoupons"("B");
+
+-- CreateIndex
+CREATE INDEX "_ExcludedCoupons_B_index" ON "public"."_ExcludedCoupons"("B");
+
+-- AddForeignKey
+ALTER TABLE "public"."File" ADD CONSTRAINT "File_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."File" ADD CONSTRAINT "File_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "public"."courses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."File" ADD CONSTRAINT "File_quizId_fkey" FOREIGN KEY ("quizId") REFERENCES "public"."quizzes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."verification_tokens" ADD CONSTRAINT "verification_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."user_roles" ADD CONSTRAINT "user_roles_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."user_roles" ADD CONSTRAINT "user_roles_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "public"."roles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."login_events" ADD CONSTRAINT "login_events_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."center_codes" ADD CONSTRAINT "center_codes_centerId_fkey" FOREIGN KEY ("centerId") REFERENCES "public"."centers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -477,6 +675,9 @@ ALTER TABLE "public"."courses" ADD CONSTRAINT "courses_centerId_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "public"."lessons" ADD CONSTRAINT "lessons_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "public"."courses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."lessons" ADD CONSTRAINT "lessons_centerId_fkey" FOREIGN KEY ("centerId") REFERENCES "public"."centers"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."contents" ADD CONSTRAINT "contents_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "public"."lessons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -497,13 +698,31 @@ ALTER TABLE "public"."enrollments" ADD CONSTRAINT "enrollments_centerCodeId_fkey
 ALTER TABLE "public"."enrollments" ADD CONSTRAINT "enrollments_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "public"."payments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "public"."lesson_enrollments" ADD CONSTRAINT "lesson_enrollments_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "public"."payments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."lesson_enrollments" ADD CONSTRAINT "lesson_enrollments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."lesson_enrollments" ADD CONSTRAINT "lesson_enrollments_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "public"."lessons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."lesson_enrollments" ADD CONSTRAINT "lesson_enrollments_enrollmentId_fkey" FOREIGN KEY ("enrollmentId") REFERENCES "public"."enrollments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "public"."lesson_progress" ADD CONSTRAINT "lesson_progress_enrollmentId_fkey" FOREIGN KEY ("enrollmentId") REFERENCES "public"."enrollments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."lesson_progress" ADD CONSTRAINT "lesson_progress_lessonEnrollmentId_fkey" FOREIGN KEY ("lessonEnrollmentId") REFERENCES "public"."lesson_enrollments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."lesson_progress" ADD CONSTRAINT "lesson_progress_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "public"."lessons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."quizzes" ADD CONSTRAINT "quizzes_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "public"."lessons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."quizzes" ADD CONSTRAINT "quizzes_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "public"."courses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."questions" ADD CONSTRAINT "questions_quizId_fkey" FOREIGN KEY ("quizId") REFERENCES "public"."quizzes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -530,6 +749,9 @@ ALTER TABLE "public"."quiz_answers" ADD CONSTRAINT "quiz_answers_selectedChoiceI
 ALTER TABLE "public"."homeworks" ADD CONSTRAINT "homeworks_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "public"."lessons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "public"."homeworks" ADD CONSTRAINT "homeworks_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "public"."courses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "public"."homework_submissions" ADD CONSTRAINT "homework_submissions_homeworkId_fkey" FOREIGN KEY ("homeworkId") REFERENCES "public"."homeworks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -542,9 +764,6 @@ ALTER TABLE "public"."payments" ADD CONSTRAINT "payments_userId_fkey" FOREIGN KE
 ALTER TABLE "public"."payment_logs" ADD CONSTRAINT "payment_logs_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "public"."payments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."login_events" ADD CONSTRAINT "login_events_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "public"."wallets" ADD CONSTRAINT "wallets_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -555,9 +774,6 @@ ALTER TABLE "public"."wallet_transactions" ADD CONSTRAINT "wallet_transactions_p
 
 -- AddForeignKey
 ALTER TABLE "public"."wallet_transactions" ADD CONSTRAINT "wallet_transactions_enrollmentId_fkey" FOREIGN KEY ("enrollmentId") REFERENCES "public"."enrollments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "public"."coupons" ADD CONSTRAINT "coupons_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "public"."courses"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."activity_events" ADD CONSTRAINT "activity_events_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -579,3 +795,30 @@ ALTER TABLE "public"."forum_votes" ADD CONSTRAINT "forum_votes_postId_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "public"."forum_votes" ADD CONSTRAINT "forum_votes_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."coupons" ADD CONSTRAINT "coupons_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "public"."users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."coupons" ADD CONSTRAINT "coupons_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "public"."courses"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."coupons" ADD CONSTRAINT "coupons_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "public"."lessons"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."coupon_usages" ADD CONSTRAINT "coupon_usages_couponId_fkey" FOREIGN KEY ("couponId") REFERENCES "public"."coupons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."coupon_usages" ADD CONSTRAINT "coupon_usages_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."_ValidCoupons" ADD CONSTRAINT "_ValidCoupons_A_fkey" FOREIGN KEY ("A") REFERENCES "public"."coupons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."_ValidCoupons" ADD CONSTRAINT "_ValidCoupons_B_fkey" FOREIGN KEY ("B") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."_ExcludedCoupons" ADD CONSTRAINT "_ExcludedCoupons_A_fkey" FOREIGN KEY ("A") REFERENCES "public"."coupons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."_ExcludedCoupons" ADD CONSTRAINT "_ExcludedCoupons_B_fkey" FOREIGN KEY ("B") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;

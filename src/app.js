@@ -166,6 +166,9 @@ import lessonsRoutes from "./modules/lessons/routes.js";
 import videoRoutes from "./modules/videos/routes.js";
 import paymentRoutes from "./modules/payments/routes.js";
 import dashboardRoutes from "./modules/dashboard/routes.js";
+import quizzesRoutes from "./modules/quizzes/routes.js";
+
+
 import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -181,6 +184,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.disable("x-powered-by");   // <--- put it here
 const server = http.createServer(app);
 
 if (process.env.NODE_ENV === "production") {
@@ -192,7 +196,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(morgan("dev"));
 app.use(cookieParser());
 
-const allowedOrigins = ["http://localhost:3000", "https://hazem-hamdy.com"];
+const allowedOrigins = ["http://localhost:3000", "https://hazem-hamdy.com", "https://www.hazem-hamdy.com"];
 
 app.use(
   cors({
@@ -205,26 +209,48 @@ app.use(
       return callback(null, true);
     },
     credentials: true,
+    optionsSuccessStatus: 200,
   })
 );
 
-app.use(compression());
-app.use(helmet());
+
 app.use(securityMiddleware);
 
 app.use(
   "/uploads",
-  express.static(path.join(process.cwd(), "Uploads"), {
+  express.static(path.join(process.cwd(), "uploads"), {
     setHeaders: (res) => {
       res.set("Cross-Origin-Resource-Policy", "cross-origin");
+      res.set("X-Content-Type-Options", "nosniff");
+
     },
   })
 );
 
+
 (async () => {
   const redis = await getRedisClient();
+  
+  // Test Redis connection
+  try {
+    await redis.ping();
+    logger.info('Redis connection successful');
+  } catch (err) {
+    logger.error('Redis connection failed:', err);
+    return;
+  }
+
   const pubClient = redis.duplicate();
   const subClient = redis.duplicate();
+
+  // Test pub/sub functionality
+  subClient.on('subscribe', (channel, count) => {
+    logger.info(`Subscribed to channel: ${channel}, total subscriptions: ${count}`);
+  });
+
+  subClient.on('message', (channel, message) => {
+    logger.info(`Raw Redis message received on ${channel}:`, message);
+  });
 
   const io = new SocketServer(server, {
     cors: { origin: allowedOrigins, credentials: true },
@@ -314,59 +340,41 @@ app.use(
     });
   });
 
-  // subClient.subscribe('user:*', async (message, channel) => {
-  //   try {
-  //     logger.info(`Received Redis message on channel: ${channel}`, {
-  //       message,
-  //       timestamp: new Date().toISOString(),
-  //     });
-  //     const parsed = JSON.parse(message);
-  //     if (parsed.event === 'force_logout') {
-  //       const userId = channel.split(':')[1];
+  // First, subscribe to the channel
+subClient.subscribe('user:force_logout', (err, count) => {
+  if (err) {
+    logger.error('Failed to subscribe to user:force_logout:', err);
+  } else {
+    logger.info(`Subscribed to user:force_logout, total subscriptions: ${count}`);
+  }
+});
 
-  //       const clients = await io.in(`user:${userId}`).allSockets();
-
-  //       // io.in(`user:${userId}`).allSockets().then((clients) => {
-  //         logger.info(`Emittingggg force_logout ----------- to room: user:${userId}`, {
-  //           clientCount: clients.size,
-  //           clientIds: Array.from(clients),
-  //           timestamp: new Date().toISOString(),
-  //         });
-  //         io.to(`user:${userId}`).emit('force_logout');
-  //       // });
-  //     }
-  //   } catch (err) {
-  //     logger.error('Error handling Redis message:', {
-  //       error: err.message,
-  //       channel,
-  //       message,
-  //       timestamp: new Date().toISOString(),
-  //     });
-  //   }
-  // });
-
-  await subClient.pSubscribe('user:*', async (message, channel) => {
+// Then, handle messages using the 'message' event
+subClient.on('message', async (channel, message) => {
   try {
     logger.info(`Received Redis message on channel: ${channel}`, {
       message,
       timestamp: new Date().toISOString(),
     });
-
-    const parsed = JSON.parse(message);
-
-    if (parsed.event === 'force_logout') {
-      const userId = channel.split(':')[1];
-      const room = `user:${userId}`;
-
-      const clients = await io.in(room).allSockets();
-
-      logger.info(`Emittingggg force_logout ----------- to room: ${room}`, {
-        clientCount: clients.size,
-        clientIds: Array.from(clients),
-        timestamp: new Date().toISOString(),
-      });
-
-      io.to(room).emit('force_logout');
+    
+    if (channel === 'user:force_logout') {
+      const parsed = JSON.parse(message);
+      if (parsed.event === 'force_logout' && parsed.userId) {
+        const userId = parsed.userId;
+        
+        const clients = await io.in(`user:${userId}`).allSockets();
+        
+        logger.info(`Emittingggg force_logout ----------- to room: user:${userId}`, {
+          clientCount: clients.size,
+          clientIds: Array.from(clients),
+          timestamp: new Date().toISOString(),
+        });
+        
+        io.to(`user:${userId}`).emit('force_logout', {
+          reason: 'Session invalidated by new login',
+          timestamp: new Date().toISOString()
+        });
+      }
     }
   } catch (err) {
     logger.error('Error handling Redis message:', {
@@ -381,6 +389,8 @@ app.use(
 
 
 
+
+
   
 })();
 
@@ -391,6 +401,7 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/lessons", lessonsRoutes);
 app.use("/api/admin/dashboard", dashboardRoutes);
 app.use("/api/payment", paymentRoutes);
+app.use("/api/quiz", quizzesRoutes);
 
 app.all(/.*/, (req, res) => {
   res.status(404).json({ status: "error", message: "resource not available" });

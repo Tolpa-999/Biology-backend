@@ -356,9 +356,9 @@ export const deleteUser = catchAsync(async (req, res, next) => {
   }
 
   // Prevent deletion of own account
-  if (id === req.user.userId) {
-    return next(new ErrorResponse('Cannot delete your own account', STATUS_CODE.FORBIDDEN));
-  }
+  // if (id === req.user.userId) {
+  //   return next(new ErrorResponse('Cannot delete your own account', STATUS_CODE.FORBIDDEN));
+  // }
 
   // Delete user (cascade will handle related records)
   await prisma.user.delete({

@@ -49,3 +49,9 @@ export const courseUsersQuerySchema = Joi.object({
   search: Joi.string().allow(""),
   status: Joi.string().valid("ACTIVE", "EXPIRED", "REFUNDED", "PENDING"),
 }).unknown(false);
+
+
+export const validateCouponSchema = Joi.object({
+      code: Joi.string().required().trim().uppercase()
+
+})

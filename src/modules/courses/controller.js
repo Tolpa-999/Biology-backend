@@ -4,6 +4,8 @@ import catchAsync from '../../utils/cathAsync.js';
 import ErrorResponse from '../../utils/errorResponse.js';
 import { STATUS_CODE, STATUS_MESSAGE } from '../../utils/httpStatusCode.js';
 import logger from '../../utils/logger.js';
+import { validateCouponForCourse } from '../../utils/couponUtils.js';
+
 
 // Optional: if you want to also delete from local filesystem
 import fs from 'fs';
@@ -97,6 +99,15 @@ export const getCourseById = catchAsync(async (req, res, next) => {
           title: true,
           description: true,
           order: true,
+          contents: {
+            select: {
+              id: true,
+              title: true,
+              duration: true,
+              type: true,
+              isFree: true
+            }
+          },
           _count: {
             select: {
               contents: true,
@@ -148,6 +159,7 @@ export const getCourseById = catchAsync(async (req, res, next) => {
     data: { course }
   });
 });
+
 
 export const createCourse = catchAsync(async (req, res, next) => {
   const { centerId, ...courseData } = req.body || {};
@@ -237,10 +249,11 @@ let course = await prisma.course.create({
   });
 });
 
+
 export const updateCourse = catchAsync(async (req, res, next) => {
   console.log("update course hitted")
   const { id } = req.params;
-  const {isPublished, price, centerId, ...updateData } = req.body || {};
+  const {isPublished, price, discountPrice, centerId, ...updateData } = req.body || {};
   let thumbnailUrl = null;
 
   console.log("update course hitted")
@@ -300,7 +313,8 @@ export const updateCourse = catchAsync(async (req, res, next) => {
     data: {
       ...updateData,
       price: parseFloat(price),
-      isPublished: isPublished == true,
+      discountPrice: parseFloat(discountPrice),
+      isPublished: isPublished == "true" || isPublished == true,
       ...(centerId && { center: { connect: { id: centerId } } }),
     },
     include: {
@@ -322,6 +336,7 @@ export const updateCourse = catchAsync(async (req, res, next) => {
     message: 'Course updated successfully'
   });
 });
+
 
 export const deleteCourse = catchAsync(async (req, res, next) => {
   const { id } = req.params;
@@ -516,44 +531,18 @@ export const enrollUserInCourse = catchAsync(async (req, res, next) => {
 
   // Apply coupon if provided
   if (couponCode) {
-    coupon = await prisma.coupon.findFirst({
-      where: {
-        code: couponCode,
-        isActive: true,
-        OR: [
-          { courseId: id },
-          { courseId: null }
-        ],
-        OR: [
-          { startDate: null },
-          { startDate: { lte: new Date() } }
-        ],
-        OR: [
-          { endDate: null },
-          { endDate: { gte: new Date() } }
-        ],
-        OR: [
-          { maxUses: null },
-          { maxUses: { gt: { usedCount: true } } }
-        ]
-      }
-    });
-
-    if (!coupon) {
-      return next(new ErrorResponse('Invalid or expired coupon', STATUS_CODE.BAD_REQUEST));
-    }
-
-    if (coupon.minPurchase && finalPrice < coupon.minPurchase) {
-      return next(new ErrorResponse('Coupon requires minimum purchase amount', STATUS_CODE.BAD_REQUEST));
-    }
-
-    // Apply discount
-    if (coupon.discountType === 'percentage') {
-      finalPrice = finalPrice * (1 - coupon.discountValue / 100);
-    } else {
-      finalPrice = Math.max(0, finalPrice - coupon.discountValue);
-    }
+  const validationResult = await validateCouponForCourse(couponCode, userId, id);
+  
+  if (!validationResult.valid) {
+    return next(new ErrorResponse(validationResult.error, STATUS_CODE.BAD_REQUEST));
   }
+
+  finalPrice = validationResult.coupon.finalAmount;
+  coupon = await prisma.coupon.findUnique({
+    where: { id: validationResult.coupon.id }
+  });
+}
+
 
   // Validate center code if provided
   let centerCodeRecord = null;
@@ -754,7 +743,6 @@ export const getCourseStats = catchAsync(async (req, res, next) => {
 });
 
 
-
 export const getCourseLessons = catchAsync(async (req, res, next) => {
   const { id } = req.params; // courseId
 
@@ -799,5 +787,40 @@ export const getCourseLessons = catchAsync(async (req, res, next) => {
     data,
   });
 });
+
+
+
+
+export const validateCourseCoupon = catchAsync(async (req, res, next) => {
+  const { code } = req.body;
+  const { id: courseId } = req.params; // Course ID from URL params
+  const userId = req.user.userId;
+
+  if (!code) {
+    return next(new ErrorResponse('Coupon code is required', STATUS_CODE.BAD_REQUEST));
+  }
+
+  // Validate coupon against the specific course
+  const validationResult = await validateCouponForCourse(code, userId, courseId);
+
+  if (!validationResult.valid) {
+    return next(new ErrorResponse(validationResult.error, STATUS_CODE.BAD_REQUEST));
+  }
+
+  await prisma.coupon.update({
+  where: { id: validationResult.coupon?.id },
+  data: { usedCount: { increment: 1 } }
+});
+
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: {
+      valid: true,
+      coupon: validationResult.coupon
+    }
+  });
+});
+
 
 
