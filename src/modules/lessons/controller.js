@@ -439,6 +439,15 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
           title: true,
           isPublished: true,
         }
+      },
+      quizzes: {
+        include: {
+          questions: {
+            include: {
+              choices: true
+            }
+          }
+        }
       }
     }
   });
@@ -449,40 +458,35 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
 
   const contents = await prisma.content.findMany({
     where: { lessonId: id },
-    orderBy: { order: 'asc' }
+    orderBy: { order: 'asc' },
+    include: {
+      quiz: {
+        include: {
+          questions: {
+            include: { choices: true }
+          }
+        }
+      }
+    }
   });
 
-  // Check if lesson contains paid content and user doesn't have access
-  // if (userId) {
-  //   const hasPaidContent = contents.some(content => !content.isFree);
-    
-  //   if (hasPaidContent) {
-  //     const hasAccess = await hasAccessToPaidContent(userId, lesson.courseId, id);
-
-  //     console.log("hasAccess   => ", hasAccess)
-      
-  //     if (!hasAccess) {
-  //       return next(
-  //         new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
-  //       );
-  //     }
-  //   }
-  // } else {
-  //   // Anonymous user - check if lesson contains paid content
-  //   const hasPaidContent = contents.some(content => !content.isFree);
-    
-  //   if (hasPaidContent) {
-  //     return next(
-  //       new ErrorResponse("المحتوى الحصري والمميز ل       المشتركين لدينا فقط", STATUS_CODE.FORBIDDEN)
-  //     );
-  //   }
-  // }
+  // Merge lesson.quizzes (standalone) with content.quizzes (inline)
+  const quizzes = [
+    ...lesson.quizzes,
+    ...contents
+      .filter(c => c.type === "QUIZ" && c.quiz !== null)
+      .map(c => c.quiz)
+  ];
 
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
-    data: { contents }
+    data: {
+      contents,
+      quizzes
+    }
   });
 });
+
 
 
 export const addContentToLesson = catchAsync(async (req, res, next) => {
@@ -776,8 +780,14 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
 
   const content = await prisma.content.findUnique({
     where: { id: contentId },
-    include: { lesson: { include: { course: true } } },
+    include: {  lesson: { include:  { course: true,  } } },
   });
+
+  console.log("content.lesson.id ===> ", )
+
+  
+
+
 
   if (!content || content.type !== "VIDEO") {
     return next(
@@ -808,6 +818,55 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
       );
     }
   }
+
+
+
+    const  lessonId =  content.lesson.id
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: {
+      quizzes: {
+        include: {
+          submissions: {
+            where: { userId },
+            select: { id: true, passed: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!lesson) {
+    return next(new ErrorResponse("Lesson not found", STATUS_CODE.NOT_FOUND));
+  }
+
+
+      if (lesson?.requiresQuizPass) {
+
+
+    
+
+
+
+
+  // If lesson doesn't require quiz pass -> allow access
+
+
+  // Check if user has passed any quiz of this lesson
+  const hasPassedQuiz = lesson.quizzes.some((quiz) =>
+    quiz.submissions.some((submission) => submission.passed === true)
+  );
+
+  if (!hasPassedQuiz) {
+    return next(
+      new ErrorResponse("بجب اجتياز الكويز على هذا الدرس ل الوصول الى المحتوى الخاص به", STATUS_CODE.FORBIDDEN)
+    );
+  }
+
+    }
+
+
 
   try {
     const signedUrl = generateBunnySignedUrl(content?.contentUrl);
@@ -1171,5 +1230,62 @@ export const reorderLessons = catchAsync(async (req, res, next) => {
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     message: 'Lessons reordered successfully'
+  });
+});
+
+
+
+export const checkLessonAccess = catchAsync(async (req, res, next) => {
+  const { lessonId } = req.params;
+  const userId = req.user.userId;
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: { quizzes: { include: { submissions: { where: { userId } } } } }
+  });
+
+  if (!lesson) {
+    return next(new ErrorResponse('Lesson not found', STATUS_CODE.NOT_FOUND));
+  }
+
+  // Check enrollment
+  const enrollment = await prisma.enrollment.findFirst({
+    where: { 
+      userId, 
+      courseId: lesson.courseId, 
+      status: 'ACTIVE' 
+    },
+  });
+
+  const lessonEnrollment = await prisma.lessonEnrollment.findFirst({
+    where: { userId, lessonId, status: 'ACTIVE' }
+  });
+
+  if (!enrollment && !lessonEnrollment && req.user.role[0]?.role?.name !== 'ADMIN') {
+    return next(new ErrorResponse('Not enrolled in the course or lesson', STATUS_CODE.FORBIDDEN));
+  }
+
+  // If lesson doesn't require quiz pass, allow access
+  if (!lesson.requiresQuizPass) {
+    return res.status(STATUS_CODE.OK).json({
+      status: STATUS_MESSAGE.SUCCESS,
+      data: { canAccess: true },
+      message: 'Lesson access granted'
+    });
+  }
+
+  // Check if any quiz submission for this lesson has passed
+  const hasPassedQuiz = lesson.quizzes.some(quiz => 
+    quiz.submissions.some(submission => submission.passed === true)
+  );
+
+  if (!hasPassedQuiz) {
+    return next(new ErrorResponse('بجب اجتياز الكويز على هذا الدرس ل الوصول الى المحتوى الخاص به', STATUS_CODE.FORBIDDEN));
+  }
+
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { canAccess: true },
+    message: 'Lesson access granted'
   });
 });

@@ -14,6 +14,10 @@ import {
   getSubmissionDetails,
   getAllSubmissions,
   gradeSubmission,
+  startQuiz,
+  getQuizWithSubmission,
+  getAllQuizzes,
+  getQuizByIdForEdit
 } from './controller.js';
 import {
   createQuizSchema,
@@ -25,6 +29,7 @@ import {
   submitQuizSchema,
   gradeSubmissionSchema,
   submissionIdSchema,
+  getAllQuizzesSchema,
 } from './schemas.js';
 import validateMiddleware from '../../middleware/validate.js';
 import authMiddleware from '../../middleware/auth.js';
@@ -51,6 +56,36 @@ const getQuizMiddleware = catchAsync(async (req, res, next) => {
 // All routes require auth
 router.use(authMiddleware);
 
+
+// Add to modules/quizzes/routes.js (after router.use(authMiddleware); and before other routes)
+
+// Get all quizzes (global, admin-only, with filters/pagination)
+router.get(
+  '/',
+  roleMiddleware(['ADMIN', 'CENTER_ADMIN']), // Role constraint here, like other admin routes
+  // validateMiddleware(getAllQuizzesSchema),
+  getAllQuizzes // New controller
+);
+
+router.post(
+  '/:quizId/start', 
+  startQuiz);
+
+router.post(
+  '/:quizId/submissions/:submissionId/submit',
+  // validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(submitQuizSchema), 
+  submitQuiz
+);
+
+router.get(
+  '/:quizId/with-submission', 
+  getQuizWithSubmission
+
+);
+
+
+
 // Get quizzes for a lesson (user or admin)
 router.get(
   '/:lessonId/quiz',
@@ -62,7 +97,7 @@ router.get(
 router.post(
   '/:lessonId/quiz',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
-  validateMiddleware(lessonIdSchema, 'params'),
+  // validateMiddleware(lessonIdSchema, 'params'),
   validateMiddleware(createQuizSchema),
   createQuiz
 );
@@ -74,11 +109,19 @@ router.get(
   getQuizById
 );
 
+// Get quiz by ID
+router.get(
+  '/:id/edit',
+  roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
+  validateMiddleware(quizIdSchema, 'params'),
+  getQuizByIdForEdit
+);
+
 // Update quiz
 router.put(
   '/:id',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
-  validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(quizIdSchema, 'params'),
   validateMiddleware(updateQuizSchema),
   updateQuiz
 );
@@ -87,7 +130,7 @@ router.put(
 router.delete(
   '/:id',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
-  validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(quizIdSchema, 'params'),
   deleteQuiz
 );
 
@@ -123,30 +166,30 @@ router.put(
 router.delete(
   '/:quizId/questions/:questionId',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
-  validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(quizIdSchema, 'params'),
   deleteQuestion
 );
 
 // Submit quiz (user)
 router.post(
   '/:quizId/submit',
-  validateMiddleware(quizIdSchema, 'params'),
-  validateMiddleware(submitQuizSchema),
+  // validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(submitQuizSchema),
   submitQuiz
 );
 
 // Get my submissions (user)
 router.get(
   '/:quizId/my-submissions',
-  validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(quizIdSchema, 'params'),
   getMySubmissions
 );
 
 // Get submission details (user)
 router.get(
   '/:quizId/submissions/:submissionId',
-  validateMiddleware(quizIdSchema, 'params'),
-  validateMiddleware(submissionIdSchema, 'params'),
+  // validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(submissionIdSchema, 'params'),
   getSubmissionDetails
 );
 
@@ -154,7 +197,7 @@ router.get(
 router.get(
   '/:quizId/submissions',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
-  validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(quizIdSchema, 'params'),
   getAllSubmissions
 );
 
@@ -162,9 +205,9 @@ router.get(
 router.post(
   '/:quizId/submissions/:submissionId/grade',
   roleMiddleware(['ADMIN', 'CENTER_ADMIN']),
-  validateMiddleware(quizIdSchema, 'params'),
-  validateMiddleware(submissionIdSchema, 'params'),
-  validateMiddleware(gradeSubmissionSchema),
+  // validateMiddleware(quizIdSchema, 'params'),
+  // validateMiddleware(submissionIdSchema, 'params'),
+  // validateMiddleware(gradeSubmissionSchema),
   gradeSubmission
 );
 

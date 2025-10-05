@@ -100,12 +100,24 @@ export const getCourseById = catchAsync(async (req, res, next) => {
           description: true,
           order: true,
           contents: {
+              orderBy: { order: 'asc' }, // ✅ uses the `order Int` field in your Content model
             select: {
               id: true,
               title: true,
               duration: true,
               type: true,
               isFree: true
+            }
+          },
+          quizzes: {
+            // orderBy: {}
+            select: {
+              id: true,
+              title: true,
+              questions: true,
+              maxAttempts: true,
+              passingScore: true,
+              timeLimit: true
             }
           },
           _count: {

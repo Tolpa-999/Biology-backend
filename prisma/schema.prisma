@@ -74,7 +74,6 @@ enum ContentType {
 enum QuestionType {
   MCQ_TEXT
   MCQ_IMAGE
-  ESSAY
 }
 
 enum VerificationType {
@@ -300,7 +299,7 @@ model Lesson {
   coupons           Coupon[] // Added for lesson-specific coupons
 
   requiresQuizPass Boolean @default(false)
-  passThreshold    Float   @default(50.0) // Percentage required to pass
+  // passThreshold    Float   @default(50.0) // Percentage required to pass
 
   contentProgress ContentProgress[]
 
@@ -320,12 +319,17 @@ model Content {
   isFree         Boolean     @default(false)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
-  bunnyVideoGuid String? // Added for Bunny.net video GUID
+  bunnyVideoGuid String?
+
+  // ✅ One-to-one relation to Quiz
+  quizId   String? @unique
+  quiz     Quiz?   @relation(fields: [quizId], references: [id])
 
   contentProgress ContentProgress[]
 
   @@map("contents")
 }
+
 
 model ContentProgress {
   id           String    @id @default(cuid())
@@ -417,7 +421,7 @@ model Quiz {
   id          String           @id @default(cuid())
   lessonId    String?
   lesson      Lesson?          @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  courseId    String? // Added for course-level quizzes
+  courseId    String?
   course      Course?          @relation(fields: [courseId], references: [id], onDelete: Cascade)
   title       String
   description String?
@@ -426,13 +430,19 @@ model Quiz {
   isPublished Boolean          @default(false)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+  order       Int?             @default(999)
+  isFree      Boolean          @default(false)
+
   questions   Question[]
   submissions QuizSubmission[]
+  score       Float?
+  files       File[]
 
-  files        File[]
-  passingScore Float  @default(60)
+  // ✅ Match relation name here
+  content Content? 
 
-  passThreshold Float? @default(70.0)
+  passingScore  Float  @default(50)
+  passThreshold Float? @default(40.0)
 
   @@map("quizzes")
 }
@@ -479,9 +489,10 @@ model QuizSubmission {
   startedAt   DateTime     @default(now())
   completedAt DateTime?
   timeSpent   Int?
-  score       Float
+  score       Float?
   totalPoints Float
   answers     QuizAnswer[]
+  passed      Boolean? @default(false)     // NEW: Tracks if user passed the quiz
 
   @@index([quizId, userId]) // Fast user quiz history
   @@index([completedAt])
@@ -494,9 +505,11 @@ model QuizAnswer {
   submission       QuizSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   questionId       String
   question         Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  selectedChoiceId String
-  selectedChoice   Choice         @relation(fields: [selectedChoiceId], references: [id], onDelete: Cascade)
-  isCorrect        Boolean
+  selectedChoiceId String?
+  selectedChoice   Choice?         @relation(fields: [selectedChoiceId], references: [id], onDelete: Cascade)
+  textAnswer       String?        // Add this field for essay answers
+  isCorrect        Boolean?
+  awardedPoints    Int?           // Add this field to match your code
 
   @@map("quiz_answers")
 }

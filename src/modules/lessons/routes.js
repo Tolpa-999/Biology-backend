@@ -42,7 +42,7 @@ router.use(authMiddleware);
 // Public routes (published lessons)
 router.get(
   '/',
-  validateMiddleware(lessonQuerySchema, 'query'),
+  // validateMiddleware(lessonQuerySchema, 'query'),
   getAllLessons
 );
 

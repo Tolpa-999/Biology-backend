@@ -6,6 +6,7 @@ export const createLessonSchema = Joi.object({
   description: Joi.string().required(),
   order: Joi.number().integer().min(0).required(),
   isPublished: Joi.boolean().default(false),
+  requiresQuizPass: Joi.boolean()
 }).unknown(false);
 
 export const updateLessonSchema = Joi.object({
@@ -15,6 +16,7 @@ export const updateLessonSchema = Joi.object({
   price: Joi.number(),
   discountPrice: Joi.number(),
   isPublished: Joi.boolean(),
+  requiresQuizPass: Joi.boolean()
 }).unknown(false);
 
 export const lessonIdSchema = Joi.object({
