@@ -42,7 +42,7 @@ import prisma from '../../loaders/prisma.js';
 const router = Router();
 
 const getQuizMiddleware = catchAsync(async (req, res, next) => {
-  const quiz = await prisma.quiz.findUnique({
+  const quiz = await prisma.content.findUnique({
     where: { id: req.params.quizId || req.params.id },
     include: { lesson: true },
   });

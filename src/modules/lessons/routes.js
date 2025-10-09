@@ -101,7 +101,7 @@ router.put(
   parseJsonFields,
 //   validateMiddleware(lessonIdSchema, 'params'),
 //   validateMiddleware(contentIdSchema, 'params'),
-  validateMiddleware(contentSchema),
+  // validateMiddleware(contentSchema),
   updateContent
 );
 

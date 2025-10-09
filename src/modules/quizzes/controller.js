@@ -10,9 +10,7 @@ import path from 'path';
 import { unlink } from 'fs/promises';
 
 
-// Add to modules/quizzes/controller.js (at the end, after existing exports)
-
-// Updated: getAllQuizzes (use 'order' for sorting, include linked content)
+// Updated: getAllQuizzes (use 'order' for sorting, no linked content needed since merged)
 
 export const getAllQuizzes = catchAsync(async (req, res, next) => {
   const { page = 1, limit = 10, search = '', isPublished, courseId = '', lessonId = '' } = req.query;
@@ -24,6 +22,7 @@ export const getAllQuizzes = catchAsync(async (req, res, next) => {
 
   // Build where clause (null-safe)
   const where = {
+    type: 'QUIZ',
     ...(search && search.trim() !== '' && { title: { contains: search.trim(), mode: 'insensitive' } }),
     ...(isPublished !== undefined ? { isPublished: isPublished === 'true' } : {}),
     ...(courseId && courseId.trim() !== '' ? { courseId: courseId.trim() } : {}),
@@ -32,7 +31,7 @@ export const getAllQuizzes = catchAsync(async (req, res, next) => {
 
   try {
     const [quizzes, totalCount] = await Promise.all([
-      prisma.quiz.findMany({
+      prisma.content.findMany({
         where,
         skip,
         take: validatedLimit,
@@ -45,15 +44,6 @@ export const getAllQuizzes = catchAsync(async (req, res, next) => {
             },
           },
           course: { select: { id: true, title: true } },
-          // NEW: Include linked content (null if not set)
-          content: {
-            select: {
-              id: true,
-              order: true,
-              isPublished: true,
-              isFree: true,
-            },
-          },
           questions: {
             select: { 
               id: true, 
@@ -70,7 +60,7 @@ export const getAllQuizzes = catchAsync(async (req, res, next) => {
         // UPDATED: Sort by 'order' asc (fallback to createdAt desc if order null)
         orderBy: { order: 'asc' },
       }),
-      prisma.quiz.count({ where }),
+      prisma.content.count({ where }),
     ]);
 
     if (quizzes.length === 0 && totalCount === 0) {
@@ -82,7 +72,6 @@ export const getAllQuizzes = catchAsync(async (req, res, next) => {
       ...quiz,
       lesson: quiz.lesson || null,
       course: quiz.course || null,
-      content: quiz.content || null, // Explicit null for unlinked
       questions: quiz.questions || [],
     }));
 
@@ -105,7 +94,7 @@ export const getAllQuizzes = catchAsync(async (req, res, next) => {
 });
 
 
-// Updated: getQuizzesForLesson (use 'order' for sorting, include linked content)
+// Updated: getQuizzesForLesson (use 'order' for sorting, no linked content)
 
 
 export const getQuizzesForLesson = catchAsync(async (req, res, next) => {
@@ -115,26 +104,18 @@ export const getQuizzesForLesson = catchAsync(async (req, res, next) => {
   const skip = (page - 1) * limit;
 
   const where = {
+    type: 'QUIZ',
     lessonId,
     ...(search && { title: { contains: search, mode: 'insensitive' } }),
     ...(isPublished !== undefined && { isPublished: isPublished === 'true' }),
   };
 
   const [quizzes, totalCount] = await Promise.all([
-    prisma.quiz.findMany({
+    prisma.content.findMany({
       where,
       skip,
       take: limit,
       include: {
-        // NEW: Include linked content
-        content: {
-          select: {
-            id: true,
-            order: true,
-            isPublished: true,
-            isFree: true,
-          },
-        },
         questions: {
           include: { 
             choices: {
@@ -151,38 +132,23 @@ export const getQuizzesForLesson = catchAsync(async (req, res, next) => {
       // UPDATED: Sort by 'order' asc
       orderBy: { order: 'asc' },
     }),
-    prisma.quiz.count({ where }),
+    prisma.content.count({ where }),
   ]);
-
-  // Transform with null handling
-  const transformedQuizzes = quizzes.map(quiz => ({
-    ...quiz,
-    content: quiz.content || null,
-  }));
 
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
-    data: { quizzes: transformedQuizzes, totalCount, page, limit },
+    data: { quizzes, totalCount, page, limit },
   });
 });
 
-// Updated: getQuizById (include linked content)
+// Updated: getQuizById (no linked content)
 
 export const getQuizById = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const quiz = await prisma.quiz.findUnique({
-    where: { id },
+  const quiz = await prisma.content.findUnique({
+    where: { id, type: 'QUIZ' },
     include: {
-      // NEW: Include linked content
-      content: {
-        select: {
-          id: true,
-          order: true,
-          isPublished: true,
-          isFree: true,
-        },
-      },
       questions: {
         orderBy: { order: 'asc' },
         include: { 
@@ -204,33 +170,18 @@ export const getQuizById = catchAsync(async (req, res, next) => {
     return next(new ErrorResponse('Quiz not found', STATUS_CODE.NOT_FOUND));
   }
 
-  // Transform with null handling
-  const transformedQuiz = {
-    ...quiz,
-    content: quiz.content || null,
-  };
-
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
-    data: { quiz: transformedQuiz },
+    data: { quiz },
   });
 });
 
 export const getQuizByIdForEdit = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const quiz = await prisma.quiz.findUnique({
-    where: { id },
+  const quiz = await prisma.content.findUnique({
+    where: { id, type: 'QUIZ' },
     include: {
-      // NEW: Include linked content
-      content: {
-        select: {
-          id: true,
-          order: true,
-          isPublished: true,
-          isFree: true,
-        },
-      },
       questions: {
         orderBy: { order: 'asc' },
         include: { 
@@ -252,20 +203,14 @@ export const getQuizByIdForEdit = catchAsync(async (req, res, next) => {
     return next(new ErrorResponse('Quiz not found', STATUS_CODE.NOT_FOUND));
   }
 
-  // Transform with null handling
-  const transformedQuiz = {
-    ...quiz,
-    content: quiz.content || null,
-  };
-
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
-    data: { quiz: transformedQuiz },
+    data: { quiz },
   });
 });
 
 
-// Updated: createQuiz (create linked Content after Quiz)
+// Updated: createQuiz (create as Content with type=QUIZ)
 export const createQuiz = catchAsync(async (req, res, next) => {
   const { lessonId } = req.params;
   const quizData = req.body;
@@ -278,47 +223,15 @@ export const createQuiz = catchAsync(async (req, res, next) => {
 
   // Permission check (as before)
 
-  const quiz = await prisma.quiz.create({
+  const quiz = await prisma.content.create({
     data: {
-      ...quizData,
       lessonId,
+      type: 'QUIZ',
+      ...quizData,
       // Use provided order or default
       order: quizData.order ?? 999,
     },
   });
-
-  try {
-    // NEW: Create linked Content (type=QUIZ)
-    const content = await prisma.content.create({
-      data: {
-        lessonId,
-        title: quiz.title,
-        type: 'QUIZ',
-        description: quiz.description ?? null,
-        contentUrl: null,
-        duration: null,
-        isPublished: quiz.isPublished ?? false,
-        order: quiz.order ?? 999, // Sync order
-        isFree: false, // Quizzes are non-free
-        bunnyVideoGuid: null,
-        quizId: quiz.id, // Link
-      },
-    });
-
-    // Update Quiz with content link (if needed for inverse)
-    await prisma.quiz.update({
-      where: { id: quiz.id },
-      data: { contentId: content.id }, // Assuming you added contentId to Quiz; optional with relation
-    });
-
-    logger.info(`Created Content wrapper for quiz ${quiz.id}: ${content.id}`);
-
-  } catch (contentError) {
-    // Recovery: If Content fails, don't delete Quiz (rollback if critical)
-    logger.error(`Failed to create Content for quiz ${quiz.id}:`, contentError);
-    // Optionally: return next(new ErrorResponse('Quiz created but content sync failed', STATUS_CODE.INTERNAL_SERVER_ERROR));
-    // For now: Continue with success, as Quiz is primary
-  }
 
   return res.status(STATUS_CODE.CREATED).json({
     status: STATUS_MESSAGE.SUCCESS,
@@ -331,9 +244,8 @@ export const updateQuiz = catchAsync(async (req, res, next) => {
   const { id } = req.params;
   const updateData = req.body;
 
-  const quiz = await prisma.quiz.findUnique({ 
-    where: { id }, 
-    include: { content: true } // Fetch linked Content
+  const quiz = await prisma.content.findUnique({ 
+    where: { id, type: 'QUIZ' }, 
   });
   if (!quiz) {
     return next(new ErrorResponse('Quiz not found', STATUS_CODE.NOT_FOUND));
@@ -341,7 +253,7 @@ export const updateQuiz = catchAsync(async (req, res, next) => {
 
   // Permission check
 
-  const updatedQuiz = await prisma.quiz.update({
+  const updatedQuiz = await prisma.content.update({
     where: { id },
     data: {
       ...updateData,
@@ -350,25 +262,6 @@ export const updateQuiz = catchAsync(async (req, res, next) => {
     },
   });
 
-  try {
-    // NEW: Sync updates to linked Content (null-safe)
-    if (quiz.content) {
-      await prisma.content.update({
-        where: { id: quiz.content.id },
-        data: {
-          title: updatedQuiz.title,
-          description: updatedQuiz.description ?? null,
-          isPublished: updatedQuiz.isPublished ?? false,
-          order: updatedQuiz.order ?? 999,
-        },
-      });
-      logger.info(`Synced Content ${quiz.content.id} for updated quiz ${id}`);
-    }
-  } catch (syncError) {
-    logger.error(`Failed to sync Content for quiz ${id}:`, syncError);
-    // Continue: Quiz update succeeded
-  }
-
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     data: { quiz: updatedQuiz },
@@ -376,13 +269,12 @@ export const updateQuiz = catchAsync(async (req, res, next) => {
   });
 });
 
-// Updated: deleteQuiz (delete linked Content in transaction)
+// Updated: deleteQuiz (delete Content if type=QUIZ)
 export const deleteQuiz = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const quiz = await prisma.quiz.findUnique({ 
-    where: { id }, 
-    include: { content: true } // Fetch to clean up
+  const quiz = await prisma.content.findUnique({ 
+    where: { id, type: 'QUIZ' }, 
   });
   if (!quiz) {
     return next(new ErrorResponse('Quiz not found', STATUS_CODE.NOT_FOUND));
@@ -391,33 +283,28 @@ export const deleteQuiz = catchAsync(async (req, res, next) => {
   // Permission check
 
   await prisma.$transaction(async (tx) => {
-    // NEW: Delete linked Content first (if exists; cascade will handle relation)
-    if (quiz.content) {
-      // Clean up any Content files (though quizzes have none)
-      if (quiz.content.contentUrl) {
-        const filePath = path.join(process.cwd(), quiz.content.contentUrl);
-        await unlink(filePath).catch((err) => logger.error(`Failed to delete content file: ${err}`));
-      }
-      await tx.content.delete({ where: { id: quiz.content.id } });
-      logger.info(`Deleted Content ${quiz.content.id} for quiz ${id}`);
+    // Clean up any Content files (though quizzes have none typically)
+    if (quiz.contentUrl) {
+      const filePath = path.join(process.cwd(), quiz.contentUrl);
+      await unlink(filePath).catch((err) => logger.error(`Failed to delete content file: ${err}`));
     }
 
     // Existing deletes (answers, submissions, etc.)
-    await tx.quizAnswer.deleteMany({ where: { submission: { quizId: id } } });
-    await tx.quizSubmission.deleteMany({ where: { quizId: id } });
-    await tx.choice.deleteMany({ where: { question: { quizId: id } } });
-    await tx.question.deleteMany({ where: { quizId: id } });
+    await tx.quizAnswer.deleteMany({ where: { submission: { contentId: id } } });
+    await tx.quizSubmission.deleteMany({ where: { contentId: id } });
+    await tx.choice.deleteMany({ where: { question: { contentId: id } } });
+    await tx.question.deleteMany({ where: { contentId: id } });
 
-    // Files (now includes Content-related if any)
-    const files = await tx.file.findMany({ where: { quizId: id } });
+    // Files
+    const files = await tx.file.findMany({ where: { contentId: id } });
     for (const file of files) {
       const filePath = path.join(process.cwd(), file.path);
       await unlink(filePath).catch((err) => logger.error(`Failed to delete file: ${err}`));
     }
-    await tx.file.deleteMany({ where: { quizId: id } });
+    await tx.file.deleteMany({ where: { contentId: id } });
 
-    // Delete Quiz (cascades to relation)
-    await tx.quiz.delete({ where: { id } });
+    // Delete Content (cascades to relations)
+    await tx.content.delete({ where: { id } });
   });
 
   return res.status(STATUS_CODE.OK).json({
@@ -427,7 +314,7 @@ export const deleteQuiz = catchAsync(async (req, res, next) => {
 });
 
 export const createQuestion = catchAsync(async (req, res, next) => {
-  const { quizId } = req.params;
+  const { quizId } = req.params; // Now contentId, but param kept as quizId
   const { type, text, explanation, order, points} = req.body;
 
   let { choices } = req.body
@@ -442,7 +329,11 @@ export const createQuestion = catchAsync(async (req, res, next) => {
 
   choices = Array.isArray(choices) ? choices : [];
 
-  const quiz = req.quiz; // From middleware
+  const quiz = await prisma.content.findUnique({ where: { id: quizId, type: 'QUIZ' } }); // req.quiz removed, fetch here
+
+  if (!quiz) {
+    return next(new ErrorResponse('Quiz not found', STATUS_CODE.NOT_FOUND));
+  }
 
   if (['MCQ_TEXT', 'MCQ_IMAGE'].includes(type) && choices.length < 2) {
     return next(new ErrorResponse('MCQ questions must have at least 2 choices', STATUS_CODE.BAD_REQUEST));
@@ -458,7 +349,7 @@ export const createQuestion = catchAsync(async (req, res, next) => {
       data: {
         category: 'QUIZ',
         type: 'IMAGE',
-        quizId,
+        contentId: quizId,
         originalName: req.files.questionImage[0].originalname,
         storedName: req.files.questionImage[0].filename,
         path: questionImageUrl,
@@ -470,7 +361,7 @@ export const createQuestion = catchAsync(async (req, res, next) => {
 
   const question = await prisma.question.create({
     data: {
-      quizId,
+      contentId: quizId,
       type,
       text,
       imageUrl: questionImageUrl,
@@ -482,9 +373,6 @@ export const createQuestion = catchAsync(async (req, res, next) => {
 
   const createdChoices = [];
   for (let i = 0; i < choices.length; i++) {
-    // FIXED: Removed order from choice creation (not in schema)
-    // const choiceOrder = choices[i].order || (i + 1); // No longer needed
-
     let choiceImageUrl = null;
     if (type === 'MCQ_IMAGE' && req.files.choiceImages[i]) {
       choiceImageUrl = req.files.choiceImages[i].path.replace(process.cwd(), '');
@@ -492,7 +380,7 @@ export const createQuestion = catchAsync(async (req, res, next) => {
         data: {
           category: 'QUIZ',
           type: 'IMAGE',
-          quizId,
+          contentId: quizId,
           originalName: req.files.choiceImages[i].originalname,
           storedName: req.files.choiceImages[i].filename,
           path: choiceImageUrl,
@@ -507,7 +395,6 @@ export const createQuestion = catchAsync(async (req, res, next) => {
         text: choices[i].text,
         isCorrect: choices[i].isCorrect,
         imageUrl: choiceImageUrl,
-        // Removed: order: choiceOrder (not supported by schema)
       },
     });
     createdChoices.push(choice);
@@ -524,7 +411,7 @@ export const createQuestion = catchAsync(async (req, res, next) => {
 export const updateQuestion = catchAsync(async (req, res, next) => {
   const { quizId, questionId } = req.params;
   const { type, text, explanation, order, points, choices: choicesStr, deleteQuestionImage } = req.body;
-const choices = req.body.choices || [];  // Fallback to empty array if missing
+  const choices = req.body.choices || [];  // Fallback to empty array if missing
   // Similar validation as create
   if (type === 'ESSAY' && choices.length > 0) {
     return next(new ErrorResponse('Essay questions cannot have choices', STATUS_CODE.BAD_REQUEST));
@@ -535,9 +422,9 @@ const choices = req.body.choices || [];  // Fallback to empty array if missing
 
   const question = await prisma.question.findUnique({
     where: { id: questionId },
-    include: { choices: true, quiz: true },
+    include: { choices: true, content: true },
   });
-  if (!question || question.quizId !== quizId) {
+  if (!question || question.contentId !== quizId) {
     return next(new ErrorResponse('Question not found', STATUS_CODE.NOT_FOUND));
   }
 
@@ -562,7 +449,7 @@ const choices = req.body.choices || [];  // Fallback to empty array if missing
       data: {
         category: 'QUIZ',
         type: 'IMAGE',
-        quizId,
+        contentId: quizId,
         originalName: req.files.questionImage[0].originalname,
         storedName: req.files.questionImage[0].filename,
         path: questionImageUrl,
@@ -622,7 +509,7 @@ const choices = req.body.choices || [];  // Fallback to empty array if missing
           data: {
             category: 'QUIZ',
             type: 'IMAGE',
-            quizId,
+            contentId: quizId,
             originalName: file.originalname,
             storedName: file.filename,
             path: choiceImageUrl,
@@ -636,7 +523,6 @@ const choices = req.body.choices || [];  // Fallback to empty array if missing
         data: {
           text: choiceData.text,
           isCorrect: choiceData.isCorrect,
-          // Removed: order: choiceOrder (not supported by schema)
           imageUrl: choiceImageUrl,
         },
       });
@@ -651,7 +537,7 @@ const choices = req.body.choices || [];  // Fallback to empty array if missing
           data: {
             category: 'QUIZ',
             type: 'IMAGE',
-            quizId,
+            contentId: quizId,
             originalName: file.originalname,
             storedName: file.filename,
             path: choiceImageUrl,
@@ -665,7 +551,6 @@ const choices = req.body.choices || [];  // Fallback to empty array if missing
           questionId: questionId,
           text: choiceData.text,
           isCorrect: choiceData.isCorrect,
-          // Removed: order: choiceOrder (not supported by schema)
           imageUrl: choiceImageUrl,
         },
       });
@@ -688,7 +573,7 @@ export const deleteQuestion = catchAsync(async (req, res, next) => {
     where: { id: questionId },
     include: { choices: true },
   });
-  if (!question || question.quizId !== quizId) {
+  if (!question || question.contentId !== quizId) {
     return next(new ErrorResponse('Question not found', STATUS_CODE.NOT_FOUND));
   }
 
@@ -705,7 +590,7 @@ export const deleteQuestion = catchAsync(async (req, res, next) => {
       const filePath = path.join(process.cwd(), question.imageUrl);
       await unlink(filePath).catch((err) => logger.error(`Failed to delete: ${err}`));
     }
-    await tx.file.deleteMany({ where: { quizId, path: { in: [question.imageUrl, ...question.choices.map(c => c.imageUrl)].filter(Boolean) } } });
+    await tx.file.deleteMany({ where: { contentId: quizId, path: { in: [question.imageUrl, ...question.choices.map(c => c.imageUrl)].filter(Boolean) } } });
     await tx.question.delete({ where: { id: questionId } });
   });
 
@@ -719,8 +604,8 @@ export const startQuiz = catchAsync(async (req, res, next) => {
   const { quizId } = req.params;
   const userId = req.user.userId;
 
-  const quiz = await prisma.quiz.findUnique({
-    where: { id: quizId },
+  const quiz = await prisma.content.findUnique({
+    where: { id: quizId, type: 'QUIZ' },
     include: { lesson: { include: { course: true } } },
   });
 
@@ -739,13 +624,13 @@ export const startQuiz = catchAsync(async (req, res, next) => {
 
   console.log("req.user.role[0] => ", req.user.role[0]?.role?.name)
   
-  if (!enrollment && req.user.role[0]?.role?.name !== 'ADMIN' ) {
+  if (!enrollment && req.user.role[0]?.role?.name !== 'ADMIN' && !quiz.isFree ) {
     return next(new ErrorResponse('Not enrolled in the course', STATUS_CODE.FORBIDDEN));
   }
 
   // Check attempts
   const attempts = await prisma.quizSubmission.count({ 
-    where: { quizId, userId } 
+    where: { contentId: quizId, userId } 
   });
   
   // if (attempts >= quiz.maxAttempts) {
@@ -755,7 +640,7 @@ export const startQuiz = catchAsync(async (req, res, next) => {
   // Check if there's an ongoing quiz submission
   const ongoingSubmission = await prisma.quizSubmission.findFirst({
     where: {
-      quizId,
+      contentId: quizId,
       userId,
       completedAt: null,
       startedAt: {
@@ -783,7 +668,7 @@ export const startQuiz = catchAsync(async (req, res, next) => {
   // Create new submission
   const submission = await prisma.quizSubmission.create({
     data: {
-      quizId,
+      contentId: quizId,
       userId,
       startedAt: new Date(),
       score: 0,
@@ -811,7 +696,7 @@ export const submitQuiz = catchAsync(async (req, res, next) => {
   const submission = await prisma.quizSubmission.findUnique({
     where: { id: submissionId },
     include: {
-      quiz: {
+      content: {
         include: { 
           questions: { include: { choices: true } },
           lesson: { include: { course: true } }
@@ -820,7 +705,7 @@ export const submitQuiz = catchAsync(async (req, res, next) => {
     }
   });
 
-  if (!submission || submission.quizId !== quizId || submission.userId !== userId) {
+  if (!submission || submission.contentId !== quizId || submission.userId !== userId) {
     return next(new ErrorResponse('Submission not found', STATUS_CODE.NOT_FOUND));
   }
 
@@ -830,9 +715,9 @@ export const submitQuiz = catchAsync(async (req, res, next) => {
   }
 
   // Validate time limit
-  if (submission.quiz.timeLimit) {
+  if (submission.content.timeLimit) {
     const elapsedTime = Date.now() - submission.startedAt.getTime();
-    const timeLimitMs = submission.quiz.timeLimit * 60 * 1000;
+    const timeLimitMs = submission.content.timeLimit * 60 * 1000;
     
     if (elapsedTime > timeLimitMs + 10000) {
       // Auto-submit with current answers or mark as expired
@@ -850,7 +735,7 @@ export const submitQuiz = catchAsync(async (req, res, next) => {
   }
 
   // Validate answers length
-  if (answers.length !== submission.quiz.questions.length) {
+  if (answers.length !== submission.content.questions.length) {
     return next(new ErrorResponse('Must answer all questions', STATUS_CODE.BAD_REQUEST));
   }
 
@@ -862,7 +747,7 @@ export const submitQuiz = catchAsync(async (req, res, next) => {
 
   // Process answers
   for (const ans of answers) {
-    const question = submission.quiz.questions.find(q => q.id === ans.questionId);
+    const question = submission.content.questions.find(q => q.id === ans.questionId);
     if (!question) {
       return next(new ErrorResponse(`Invalid question ID: ${ans.questionId}`, STATUS_CODE.BAD_REQUEST));
     }
@@ -912,7 +797,7 @@ export const submitQuiz = catchAsync(async (req, res, next) => {
     updateData.score = finalScore;
 
     // ✅ determine if passed
-    const requiredScore = submission.quiz.passingScore ?? 50; // fallback 50%
+    const requiredScore = submission.content.passingScore ?? 50; // fallback 50%
     updateData.passed = finalScore >= requiredScore;
   } else {
     updateData.passed = null; // essays might be graded later
@@ -947,18 +832,9 @@ export const getQuizWithSubmission = catchAsync(async (req, res, next) => {
   }
 
   const [quiz, submissions] = await Promise.all([
-    prisma.quiz.findUnique({
-      where: { id: quizId },
+    prisma.content.findUnique({
+      where: { id: quizId, type: 'QUIZ' },
       include: {
-        // NEW: Include linked content
-        content: {
-          select: {
-            id: true,
-            order: true,
-            isPublished: true,
-            isFree: true,
-          },
-        },
         questions: {
           orderBy: { order: 'asc' },
           include: { 
@@ -975,7 +851,7 @@ export const getQuizWithSubmission = catchAsync(async (req, res, next) => {
       },
     }),
     prisma.quizSubmission.findMany({
-      where: { quizId, userId },
+      where: { contentId: quizId, userId },
       orderBy: { completedAt: 'desc' },
       take: 1,
     }),
@@ -1004,21 +880,15 @@ export const getQuizWithSubmission = catchAsync(async (req, res, next) => {
   }
 
   const attemptCount = await prisma.quizSubmission.count({
-    where: { quizId, userId },
+    where: { contentId: quizId, userId },
   });
 
   canRetake = (attemptCount ?? 0) < (quiz.maxAttempts ?? 1); // Null-safe
 
-  // Transform with null handling
-  const transformedQuiz = {
-    ...quiz,
-    content: quiz.content || null,
-  };
-
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     data: { 
-      quiz: transformedQuiz, 
+      quiz, 
       latestSubmission,
       canRetake,
       remainingTime,
@@ -1035,7 +905,7 @@ export const getMySubmissions = catchAsync(async (req, res, next) => {
   const userId = req.user.userId;
 
   const submissions = await prisma.quizSubmission.findMany({
-    where: { quizId, userId },
+    where: { contentId: quizId, userId },
     orderBy: { completedAt: 'desc' },
     include: {
       answers: {
@@ -1076,7 +946,7 @@ export const getSubmissionDetails = catchAsync(async (req, res, next) => {
     },
   });
 
-  if (!submission || submission.quizId !== quizId || submission.userId !== userId) {
+  if (!submission || submission.contentId !== quizId || submission.userId !== userId) {
     return next(new ErrorResponse('Submission not found or access denied', STATUS_CODE.NOT_FOUND));
   }
 
@@ -1094,7 +964,7 @@ export const getAllSubmissions = catchAsync(async (req, res, next) => {
 
   const [submissions, totalCount] = await Promise.all([
     prisma.quizSubmission.findMany({
-      where: { quizId },
+      where: { contentId: quizId },
       skip,
       take: limit,
       include: {
@@ -1103,7 +973,7 @@ export const getAllSubmissions = catchAsync(async (req, res, next) => {
       },
       orderBy: { completedAt: 'desc' },
     }),
-    prisma.quizSubmission.count({ where: { quizId } }),
+    prisma.quizSubmission.count({ where: { contentId: quizId } }),
   ]);
 
   return res.status(STATUS_CODE.OK).json({
@@ -1118,10 +988,10 @@ export const gradeSubmission = catchAsync(async (req, res, next) => {
 
   const submission = await prisma.quizSubmission.findUnique({
     where: { id: submissionId },
-    include: { answers: true, quiz: true },
+    include: { answers: true, content: true },
   });
 
-  if (!submission || submission.quizId !== quizId) {
+  if (!submission || submission.contentId !== quizId) {
     return next(new ErrorResponse('Submission not found', STATUS_CODE.NOT_FOUND));
   }
 
@@ -1165,7 +1035,3 @@ export const gradeSubmission = catchAsync(async (req, res, next) => {
     message: allGraded ? 'Submission fully graded' : 'Partial grading applied',
   });
 });
-
-
-
-

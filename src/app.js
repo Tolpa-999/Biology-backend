@@ -167,6 +167,7 @@ import videoRoutes from "./modules/videos/routes.js";
 import paymentRoutes from "./modules/payments/routes.js";
 import dashboardRoutes from "./modules/dashboard/routes.js";
 import quizzesRoutes from "./modules/quizzes/routes.js";
+import progressRoutes from "./modules/progress/routes.js";
 
 
 import cookieParser from "cookie-parser";
@@ -402,6 +403,7 @@ app.use("/api/lessons", lessonsRoutes);
 app.use("/api/admin/dashboard", dashboardRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/quiz", quizzesRoutes);
+app.use("/api/progress", progressRoutes);
 
 app.all(/.*/, (req, res) => {
   res.status(404).json({ status: "error", message: "resource not available" });

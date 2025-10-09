@@ -33,13 +33,16 @@ export const lessonQuerySchema = Joi.object({
 }).unknown(false);
 
 export const contentSchema = Joi.object({
+  id: Joi.string(),
   title: Joi.string().min(1).max(255).optional(),
   type: Joi.string().valid("VIDEO", "PDF", "IMAGE", "TEXT", "QUIZ").optional(),
   contentUrl: Joi.optional(),
-  duration: Joi.number().min(0).optional(),
+  duration: Joi.optional().allow("0"),
   order: Joi.number().integer().min(0).optional(),
   isFree: Joi.boolean().default(false),
   isPublished: Joi.boolean().default(true),
+  // lessonId: Joi.string(),
+  // courseId: Joi.optional()
 }).unknown(false);
 
 export const contentIdSchema = Joi.object({

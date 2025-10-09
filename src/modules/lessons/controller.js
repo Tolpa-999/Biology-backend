@@ -37,7 +37,6 @@ export const getAllLessons = catchAsync(async (req, res, next) => {
         _count: {
           select: {
             contents: true,
-            quizzes: true,
             homeworks: true,
           }
         }
@@ -201,7 +200,6 @@ export const deleteLesson = catchAsync(async (req, res, next) => {
       _count: {
         select: {
           contents: true,
-          quizzes: true,
           homeworks: true,
           lessonProgress: true,
         }
@@ -228,7 +226,7 @@ export const deleteLesson = catchAsync(async (req, res, next) => {
   }
 
   // Check if lesson has content that can't be deleted
-  if (lesson._count.contents > 0 || lesson._count.quizzes > 0 || lesson._count.homeworks > 0) {
+  if (lesson._count.contents > 0 || lesson._count.homeworks > 0) {
     return next(new ErrorResponse('Cannot delete lesson with associated content. Please delete all content first.', STATUS_CODE.CONFLICT));
   }
 
@@ -261,7 +259,7 @@ export const deleteLesson = catchAsync(async (req, res, next) => {
 
 
 // Helper function to check if user has access to paid content
-const hasAccessToPaidContent = async (userId, courseId, lessonId = null) => {
+export const hasAccessToPaidContent = async (userId, courseId, lessonId = null) => {
   // Check if user is admin or center admin
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -343,7 +341,13 @@ export const getLessonById = catchAsync(async (req, res, next) => {
         }
       },
       contents: {
-        where: { isPublished: true },
+        where: { 
+          isPublished: true,
+          OR: [
+            { type: { not: 'QUIZ' } },
+            { type: 'QUIZ' }
+          ]
+        },
         orderBy: { order: 'asc' },
         select: {
           id: true,
@@ -353,14 +357,7 @@ export const getLessonById = catchAsync(async (req, res, next) => {
           duration: true,
           order: true,
           isFree: true,
-        }
-      },
-      quizzes: {
-        where: { isPublished: true },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          title: true,
+          // Quiz-specific fields if type === 'QUIZ'
           description: true,
           timeLimit: true,
           maxAttempts: true,
@@ -385,7 +382,6 @@ export const getLessonById = catchAsync(async (req, res, next) => {
       _count: {
         select: {
           contents: true,
-          quizzes: true,
           homeworks: true,
         }
       }
@@ -439,15 +435,6 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
           title: true,
           isPublished: true,
         }
-      },
-      quizzes: {
-        include: {
-          questions: {
-            include: {
-              choices: true
-            }
-          }
-        }
       }
     }
   });
@@ -460,29 +447,18 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
     where: { lessonId: id },
     orderBy: { order: 'asc' },
     include: {
-      quiz: {
-        include: {
-          questions: {
-            include: { choices: true }
-          }
+      questions: {
+        include: { 
+          choices: true 
         }
       }
     }
   });
 
-  // Merge lesson.quizzes (standalone) with content.quizzes (inline)
-  const quizzes = [
-    ...lesson.quizzes,
-    ...contents
-      .filter(c => c.type === "QUIZ" && c.quiz !== null)
-      .map(c => c.quiz)
-  ];
-
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     data: {
-      contents,
-      quizzes
+      contents
     }
   });
 });
@@ -524,6 +500,15 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Get the highest order number for existing contents
+  const lastContent = await prisma.content.findFirst({
+    where: { lessonId: id },
+    orderBy: { order: 'desc' }
+  });
+
+  // Use provided order or default to last order + 1
+  const contentOrder = order ? parseInt(order) : (lastContent ? lastContent.order + 1 : 0);
+
   // Handle file upload if provided
   if (req.file) {
     const newFilename = req.file.filename;
@@ -542,9 +527,7 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
         isFree: isFree,
       }
     });
-    console.log("file => ", file)
   }
-
 
   const content = await prisma.content.create({
     data: {
@@ -552,13 +535,11 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
       type,
       contentUrl,
       duration: duration ? parseInt(duration) : null,
-      order: parseInt(order),
+      order: contentOrder, // Use the calculated order
       isFree: isFree,
       lesson: { connect: { id } }
     }
   });
-
-  console.log("content => ", content)
 
   logger.info(`Content added to lesson ${id}: ${content.id} by user: ${req.user.userId}`);
 
@@ -568,7 +549,6 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
     message: 'Content added successfully'
   });
 });
-
 
 
 
@@ -631,9 +611,10 @@ export const createVideoContent = catchAsync(async (req, res, next) => {
 });
 
 // Complete video upload and save to database
+// In your controller.js - completeVideoUpload function
 export const completeVideoUpload = catchAsync(async (req, res, next) => {
   const { id } = req.params;
-  const { guid, title, duration, order, isFree, mimeType  } = req.body;
+  const { guid, title, duration, order, isFree, mimeType, isPublished } = req.body;
 
   // Check if lesson exists
   const lesson = await prisma.lesson.findUnique({
@@ -670,30 +651,41 @@ export const completeVideoUpload = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Get the highest order number for existing contents in this lesson
+  const lastContent = await prisma.content.findFirst({
+    where: { lessonId: id },
+    orderBy: { order: 'desc' }
+  });
 
-  await prisma.file.create({
+  // Use provided order or default to last order + 1
+  const contentOrder = order ? parseInt(order) : (lastContent ? lastContent.order + 1 : 0);
+
+  try {
+    // Create file entry
+    await prisma.file.create({
       data: {
         category: 'DOCUMENT',
         type: 'VIDEO',
         originalName: title,
         storedName: title,
         path: 'private-video',
-        mimeType,
+        mimeType: mimeType || 'video/mp4',
         size: 0
       }
     });
 
-  try {
+    // Create content with proper order value
     const content = await prisma.content.create({
       data: {
         title,
         type: "VIDEO",
         bunnyVideoGuid: guid,
-        duration: parseInt(duration),
-        order: parseInt(order),
-        isFree: isFree == "true",
+        duration: duration ? parseInt(duration) : null,
+        order: contentOrder, // Use the calculated order
+        isFree: isFree === "true" || isFree === true,
+        isPublished: isPublished == "true" || isPublished == true,
         lesson: { connect: { id } },
-                contentUrl: `${guid}`,
+        contentUrl: `${guid}`,
       },
     });
 
@@ -826,7 +818,11 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     include: {
-      quizzes: {
+      contents: {
+        where: { 
+          type: 'QUIZ',
+          isPublished: true 
+        },
         include: {
           submissions: {
             where: { userId },
@@ -854,7 +850,7 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
 
 
   // Check if user has passed any quiz of this lesson
-  const hasPassedQuiz = lesson.quizzes.some((quiz) =>
+  const hasPassedQuiz = lesson.contents.some((quiz) =>
     quiz.submissions.some((submission) => submission.passed === true)
   );
 
@@ -898,7 +894,7 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
 
 export const updateContent = catchAsync(async (req, res, next) => {
   const { id, contentId } = req.params;
-  const { title, type, duration, order, isFree } = req.body;
+  const { title, type, duration, order, isFree, isPublished } = req.body;
   let contentUrl = null;
 
   // Check if lesson and content exist
@@ -989,6 +985,7 @@ export const updateContent = catchAsync(async (req, res, next) => {
     duration: duration ? parseInt(duration) : null,
     order: parseInt(order),
     isFree: isFree,
+    isPublished,
     ...(contentUrl && { contentUrl })
   };
 
@@ -1147,8 +1144,11 @@ export const getLessonStats = catchAsync(async (req, res, next) => {
       where: { lessonId: id },
       _count: { id: true }
     }),
-    prisma.quiz.aggregate({
-      where: { lessonId: id },
+    prisma.content.aggregate({
+      where: { 
+        lessonId: id,
+        type: 'QUIZ'
+      },
       _count: { id: true },
       _avg: { 
         timeLimit: true,
@@ -1241,7 +1241,16 @@ export const checkLessonAccess = catchAsync(async (req, res, next) => {
 
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
-    include: { quizzes: { include: { submissions: { where: { userId } } } } }
+    include: { 
+      contents: { 
+        where: { type: 'QUIZ' },
+        include: { 
+          submissions: { 
+            where: { userId } 
+          } 
+        } 
+      } 
+    }
   });
 
   if (!lesson) {
@@ -1275,7 +1284,7 @@ export const checkLessonAccess = catchAsync(async (req, res, next) => {
   }
 
   // Check if any quiz submission for this lesson has passed
-  const hasPassedQuiz = lesson.quizzes.some(quiz => 
+  const hasPassedQuiz = lesson.contents.some(quiz => 
     quiz.submissions.some(submission => submission.passed === true)
   );
 

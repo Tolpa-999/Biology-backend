@@ -75,7 +75,6 @@ export const getAllCourses = catchAsync(async (req, res, next) => {
   });
 });
 
-
 export const getCourseById = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
@@ -106,24 +105,36 @@ export const getCourseById = catchAsync(async (req, res, next) => {
               title: true,
               duration: true,
               type: true,
-              isFree: true
-            }
-          },
-          quizzes: {
-            // orderBy: {}
-            select: {
-              id: true,
-              title: true,
-              questions: true,
-              maxAttempts: true,
+              isFree: true,
               passingScore: true,
-              timeLimit: true
+              timeLimit: true,
+              questions: true,
+
             }
           },
+          // UPDATED: Quizzes are now contents with type 'QUIZ'
+          // : {
+          //   where: { type: 'QUIZ', isPublished: true },
+          //   orderBy: { order: 'asc' },
+          //   select: {
+          //     id: true,
+          //     title: true,
+          //     description: true,
+          //     timeLimit: true,
+          //     maxAttempts: true,
+          //     passingScore: true,
+          //     passThreshold: true,
+          //     _count: {
+          //       select: {
+          //         questions: true,
+          //       }
+          //     }
+          //   }
+          // },
           _count: {
             select: {
               contents: true,
-              quizzes: true,
+              // quizContents: true,
               homeworks: true,
             }
           }
@@ -771,29 +782,44 @@ export const getCourseLessons = catchAsync(async (req, res, next) => {
     });
   }
 
-  // Fetch all lessons for that course
+  // 2️⃣ Fetch lessons with all contents and homeworks
   const lessons = await prisma.lesson.findMany({
     where: { courseId: id },
     orderBy: { order: "asc" },
     include: {
-      contents: true,
-      quizzes: true,
-      homeworks: true,
-      _count: {
+      contents: {
         select: {
-          contents: true,
-          quizzes: true,
-          homeworks: true,
+          id: true,
+          type: true, // important — so we can detect QUIZ type
         },
       },
+      homeworks: true,
     },
   });
 
-  // Map into desired format
-  const data = lessons.map((lesson) => ({
-    lesson,
-  }));
+  // 3️⃣ Compute statistics per lesson
+  const data = lessons.map((lesson) => {
+    const totalContents = lesson.contents.length;
 
+    // Filter quiz-type contents
+    const quizCount = lesson.contents.filter(
+      (content) => content.type === "QUIZ"
+    ).length;
+
+    const homeworkCount = lesson.homeworks.length;
+
+    // Return clean structure
+    return {
+      ...lesson,
+      _count: {
+        contents: totalContents,
+        quizzes: quizCount,
+        homeworks: homeworkCount,
+      },
+    };
+  });
+
+  // 4️⃣ Return result
   return res.status(STATUS_CODE.OK).json({
     status: STATUS_MESSAGE.SUCCESS,
     data,
