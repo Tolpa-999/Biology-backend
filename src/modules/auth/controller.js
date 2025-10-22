@@ -19,6 +19,9 @@ import sendEmail from '../../services/sendEmail.js';
 import { generateEmailVerificationCode } from '../../services/GenerateEmailVerificationCode.js';
 import { resetPasswordEmailBody, verifyEmailBody } from '../../services/generateEmailsText.js';
 import { getRedisClient } from '../../loaders/redis.js';
+import { safeRedisOperation } from '../../utils/redisHelper.js'; // Adjust path as needed
+
+
 
 const VERIFICATION_CODE_EXPIRY_MINUTES = 15;
 const RESET_CODE_EXPIRY_MINUTES = 15;
@@ -71,7 +74,6 @@ const createVerificationToken = async (userId, type, code, expiryMinutes) => {
 };
 
 
-
 export const login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
 
@@ -119,28 +121,31 @@ export const login = catchAsync(async (req, res, next) => {
   const accessToken = generateAccessToken({ 
     userId: updatedUser.id, 
     role: updatedUser.userRoles, 
-    sessionVersion: updatedUser.sessionVersion  // NEW: Include in JWT
+    sessionVersion: updatedUser.sessionVersion
   });
   const refreshToken = generateRefreshToken({ userId: updatedUser.id });
 
   await setRefreshToken(updatedUser.id, refreshToken);
   setRefreshCookie(res, refreshToken);
 
+  // NEW: Using safeRedisOperation helper
+  const publishResult = await safeRedisOperation(async (redis) => {
+    const result = await redis.publish(`user:force_logout`, JSON.stringify({ 
+      event: 'force_logout',
+      userId: updatedUser.id,
+      timestamp: new Date().toISOString(),
+      reason: 'New login from different device'
+    }));
+    
+    logger.info(`Published force_logout to user:force_logout channel for user:${updatedUser.id}`);
+    return result; // Returns the number of clients that received the message
+  }, false); // fallback value if Redis fails
 
-
-
-
-  // NEW: Publish force_logout to invalidate other sessions (real-time)
-  const redis = await getRedisClient();
-  
-  await redis.publish(`user:force_logout`, JSON.stringify({ 
-  event: 'force_logout',
-  userId: updatedUser.id,
-  timestamp: new Date().toISOString(),
-  reason: 'New login from different device'
-}));
-logger.info(`Published force_logout to user:force_logout channel for user:${updatedUser.id}`);
-
+  if (publishResult === false) {
+    logger.warn('Redis not available for publishing force_logout event');
+  } else {
+    logger.info(`Force logout event published successfully, received by ${publishResult} clients`);
+  }
 
   const { passwordHash, sessionVersion, ...userWithoutSensitive } = updatedUser;
 
@@ -151,8 +156,9 @@ logger.info(`Published force_logout to user:force_logout channel for user:${upda
     data: { user: userWithoutSensitive, accessToken, expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m' },
     message: 'Login successful',
   });
-
 });
+
+
 
 
 

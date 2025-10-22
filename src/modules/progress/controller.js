@@ -1489,7 +1489,7 @@ export const getCourseContent = catchAsync(async (req, res, next) => {
       ...content,
       type: content.type,
       progress: content.contentProgress?.[0] || null,
-      isAccessible: content.type === 'QUIZ' || !requiresQuizPass,
+      isAccessible: !requiresQuizPass,
       requiresQuizPass,
       lessonId: null,
     };
@@ -1513,6 +1513,7 @@ export const getCourseContent = catchAsync(async (req, res, next) => {
       ],
     },
   });
+  
   const progressPercentage = totalContents > 0 ? (completedContent / totalContents) * 100 : 0;
 
   return res.status(STATUS_CODE.OK).json({

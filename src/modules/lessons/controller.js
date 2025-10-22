@@ -446,13 +446,32 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
   const contents = await prisma.content.findMany({
     where: { lessonId: id },
     orderBy: { order: 'asc' },
-    include: {
-      questions: {
-        include: { 
-          choices: true 
+      select: {
+    id: true,
+    lessonId: true,
+    title: true,
+    type: true,
+    duration: true,
+    isPublished: true,
+    order: true,
+    isFree: true,
+    // exclude createdAt, updatedAt, bunnyVideoGuid
+    questions: {
+      select: {
+        id: true,
+        text: true,
+        choices: {
+          select: {
+            id: true,
+            text: true,
+            imageUrl: true,
+
+          }
         }
       }
     }
+  }
+
   });
 
   return res.status(STATUS_CODE.OK).json({
@@ -467,8 +486,8 @@ export const getLessonContents = catchAsync(async (req, res, next) => {
 
 export const addContentToLesson = catchAsync(async (req, res, next) => {
   const { id } = req.params;
-  const { title, type, duration, order, isFree } = req.body;
-  let contentUrl = null;
+  const { title, type, duration, order, isFree, outsideLink, youtubeVideoID, isPublished } = req.body;
+  let contentUrl =  null;
 
   // Check if lesson exists
   const lesson = await prisma.lesson.findUnique({
@@ -537,9 +556,15 @@ export const addContentToLesson = catchAsync(async (req, res, next) => {
       duration: duration ? parseInt(duration) : null,
       order: contentOrder, // Use the calculated order
       isFree: isFree,
-      lesson: { connect: { id } }
+      lesson: { connect: { id } },
+      outsideLink: outsideLink || null,
+      youtubeVideoID: youtubeVideoID || null,
+      isPublished: isPublished,
     }
   });
+
+   console.log("content => ", content)
+   console.log("isPublished => ", isPublished)
 
   logger.info(`Content added to lesson ${id}: ${content.id} by user: ${req.user.userId}`);
 
@@ -883,6 +908,157 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
 });
 
 
+// Get YouTube Embed URL
+export const getYoutubeEmbedUrl = catchAsync(async (req, res, next) => {
+  const { contentId } = req.params;
+  const userId = req.user.userId;
+
+  console.log("get youtube video hitted")
+
+  // Fetch the content with relations
+  const content = await prisma.content.findUnique({
+    where: { id: contentId },
+    include: {
+      lesson: { include: { course: true } },
+    },
+  });
+
+    console.log("get youtube video hitted 2")
+
+
+  if (!content || content.type !== "YoutubeVideo") {
+    return next(
+      new ErrorResponse(
+        "المحتوى غير موجود أو ليس من نوع YouTube",
+        STATUS_CODE.NOT_FOUND
+      )
+    );
+  }
+
+  console.log("get youtube video hitted 3")
+
+  const userExists = await prisma.user.findUnique({ where: { id: userId } });
+  if (!userExists) {
+    return next(
+      new ErrorResponse("المستخدم غير موجود", STATUS_CODE.UNAUTHORIZED)
+    );
+  }
+
+  // Check if content is paid and user has access
+  if (!content.isFree) {
+    const hasAccess = await hasAccessToPaidContent(
+      userId,
+      content.lesson.courseId,
+      content.lessonId
+    );
+
+    console.log("content.isFree => ", content.isFree)
+
+    if (!hasAccess) {
+      return next(
+        new ErrorResponse(
+          "المحتوى الحصري والمميز للمشتركين لدينا فقط",
+          STATUS_CODE.FORBIDDEN
+        )
+      );
+    }
+  }
+
+  const lessonId = content.lesson.id;
+
+  // Check if quiz pass is required
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: {
+      contents: {
+        where: {
+          type: "QUIZ",
+          isPublished: true,
+        },
+        include: {
+          submissions: {
+            where: { userId },
+            select: { id: true, passed: true },
+          },
+        },
+      },
+    },
+  });
+
+  console.log("get youtube video hitted 4")
+
+  if (!lesson) {
+    return next(new ErrorResponse("Lesson not found", STATUS_CODE.NOT_FOUND));
+
+  }
+
+  console.log("get youtube video hitted 5")
+
+  if (lesson?.requiresQuizPass) {
+    const hasPassedQuiz = lesson.contents.some((quiz) =>
+      quiz.submissions.some((submission) => submission.passed === true)
+    );
+
+
+
+    console.log("hasPassedQuiz => ", hasPassedQuiz)
+
+    if (!hasPassedQuiz) {
+      return next(
+        new ErrorResponse(
+          "يجب اجتياز الكويز الخاص بهذا الدرس للوصول إلى الفيديو",
+          STATUS_CODE.FORBIDDEN
+        )
+      );
+    }
+  }
+
+      console.log("lesson?.requiresQuizPass => ", lesson?.requiresQuizPass);
+
+  try {
+    // ✅ Handle YouTube links of all formats
+    let videoId = content.youtubeVideoID?.trim(); // 🔥 fixed lowercase
+
+    if (!videoId) {
+      return next(
+        new ErrorResponse("رابط الفيديو غير موجود", STATUS_CODE.BAD_REQUEST)
+      );
+    }
+
+    // If full YouTube link was stored instead of ID
+    if (videoId.includes("youtube.com") || videoId.includes("youtu.be")) {
+      const match = videoId.match(
+        /(?:v=|\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})/
+      );
+      if (match) {
+        videoId = match[1];
+      } else {
+        return next(
+          new ErrorResponse("رابط الفيديو غير صالح", STATUS_CODE.BAD_REQUEST)
+        );
+      }
+    }
+
+    // ✅ Build the proper embed URL
+    const embedUrl = `https://www.youtube.com/embed/${videoId}`;
+
+    return res.status(STATUS_CODE.OK).json({
+      status: STATUS_MESSAGE.SUCCESS,
+      data: { embedUrl, content },
+      message: "تم إنشاء رابط YouTube بنجاح",
+    });
+  } catch (err) {
+    console.error("getYoutubeEmbedUrl error:", err.message);
+    return next(
+      new ErrorResponse(
+        `فشل إنشاء رابط YouTube: ${err.message}`,
+        STATUS_CODE.INTERNAL_SERVER_ERROR
+      )
+    );
+  }
+});
+
+
 
 
 
@@ -894,7 +1070,8 @@ export const getSignedUrl = catchAsync(async (req, res, next) => {
 
 export const updateContent = catchAsync(async (req, res, next) => {
   const { id, contentId } = req.params;
-  const { title, type, duration, order, isFree, isPublished } = req.body;
+  const { title, type, duration, order, isFree, isPublished, outsideLink, youtubeVideoID,
+ } = req.body;
   let contentUrl = null;
 
   // Check if lesson and content exist
@@ -986,7 +1163,10 @@ export const updateContent = catchAsync(async (req, res, next) => {
     order: parseInt(order),
     isFree: isFree,
     isPublished,
-    ...(contentUrl && { contentUrl })
+    ...(contentUrl && { contentUrl }),
+        ...(outsideLink !== undefined && { outsideLink }),
+    ...(youtubeVideoID !== undefined && { youtubeVideoID }),
+
   };
 
   const updatedContent = await prisma.content.update({
@@ -1298,3 +1478,135 @@ export const checkLessonAccess = catchAsync(async (req, res, next) => {
     message: 'Lesson access granted'
   });
 });
+
+
+
+// Get full content details by ID (with access checks)
+export const getContentDetailsById = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user?.userId;
+
+  // ✅ 1. Fetch the content and its related data
+  const content = await prisma.content.findUnique({
+    where: { id: id },
+    include: {
+      lesson: {
+        include: {
+          course: true,
+        },
+      },
+    },
+  });
+
+  // ❌ 2. Handle missing content
+  if (!content) {
+    return next(new ErrorResponse("المحتوى غير موجود", STATUS_CODE.NOT_FOUND));
+  }
+
+  // ✅ 3. Check if user exists
+  const userExists = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!userExists) {
+    return next(
+      new ErrorResponse("المستخدم غير موجود", STATUS_CODE.UNAUTHORIZED)
+    );
+  }
+
+  // 🚫 4. Handle paid content access
+  if (!content.isFree) {
+    const hasAccess = await hasAccessToPaidContent(
+      userId,
+      content.lesson.courseId,
+      content.lessonId
+    );
+
+
+
+    if (!hasAccess) {
+      return next(
+        new ErrorResponse(
+          "المحتوى الحصري والمميز للمشتركين لدينا فقط",
+          STATUS_CODE.FORBIDDEN
+        )
+      );
+    }
+  }
+
+  // ✅ 5. Check if lesson requires passing quiz
+  const lessonId = content.lesson.id;
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: {
+      contents: {
+        where: { type: "QUIZ", isPublished: true },
+        include: {
+          submissions: {
+            where: { userId },
+            select: { id: true, passed: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!lesson) {
+    return next(new ErrorResponse("Lesson not found", STATUS_CODE.NOT_FOUND));
+  }
+
+  if (lesson?.requiresQuizPass) {
+    const hasPassedQuiz = lesson.contents.some((quiz) =>
+      quiz.submissions.some((submission) => submission.passed === true)
+    );
+
+    console.log("lesson?.requiresQuizPass => ", lesson?.requiresQuizPass);
+
+    console.log("hasPassedQuiz => ", hasPassedQuiz)
+
+    if (!hasPassedQuiz) {
+      return next(
+        new ErrorResponse(
+          "يجب اجتياز الكويز الخاص بهذا الدرس للوصول إلى المحتوى",
+          STATUS_CODE.FORBIDDEN
+        )
+      );
+    }
+  }
+
+  // ✅ 6. Build the structured response (frontend-friendly)
+  const contentDetails = {
+    id: content.id,
+    title: content.title,
+    type: content.type,
+    duration: content.duration,
+    isFree: content.isFree,
+    isPublished: content.isPublished,
+    order: content.order,
+    createdAt: content.createdAt,
+    updatedAt: content.updatedAt,
+    description: content.description,
+    youtubeVideoID: content.youtubeVideoID,
+    outsideLink: content.outsideLink,
+    contentUrl: content.contentUrl,
+    lesson: {
+      id: content.lesson.id,
+      title: content.lesson.title,
+      description: content.lesson.description,
+      course: {
+        id: content.lesson.course.id,
+        title: content.lesson.course.title,
+        academicYear: content.lesson.course.academicYear,
+        isPublished: content.lesson.course.isPublished,
+      },
+    },
+  };
+
+  // ✅ 7. Return success response
+  return res.status(STATUS_CODE.OK).json({
+    status: STATUS_MESSAGE.SUCCESS,
+    data: { content:  {...contentDetails} },
+    message: "تم جلب تفاصيل المحتوى بنجاح",
+  });
+});
+

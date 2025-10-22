@@ -17,6 +17,8 @@ import {
   getUploadByGuid,
   refreshUploadHeaders,
   saveUploadUrl,
+  getYoutubeEmbedUrl,
+  getContentDetailsById,
 } from './controller.js';
 import {
   createLessonSchema,
@@ -83,6 +85,8 @@ router.get(
 //   validateMiddleware(lessonIdSchema, 'params'),
   getLessonContents
 );
+
+
 
 router.post(
   '/:id/contents',
@@ -179,6 +183,20 @@ router.get(
   getSignedUrl
 );
 
+router.get(
+  '/contents/:contentId/youtube-video', 
+  authMiddleware, 
+  getYoutubeEmbedUrl
+);
 
-export default router
-;
+
+
+
+router.get(
+  '/:id/content',
+  //   validateMiddleware(lessonIdSchema, 'params'),
+  getContentDetailsById
+);
+
+
+export default router;
